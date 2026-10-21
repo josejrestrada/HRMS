@@ -4,6 +4,11 @@ Record every change to a decision made in `ARCHITECTURE.md`, `DESIGN.md` or `RES
 
 Format: date, decision, why, what it replaces.
 
+## 2026-10-21 - Goa is the reference state for statutory rules
+- **Decision:** `RESEARCH.md` uses Goa's Shops and Establishments law (9 sick, 6 casual, 15 earned days as statutory minimums) and Goa's holiday calendar. Company policy keeps CL 8 and EL 18, and SL is set to the statutory 9 (R6 to R8, R23).
+- **Why:** the company is in Goa.
+- **Replaces:** Karnataka as the reference state.
+
 ## 2026-10-21 - Stack changed to Next.js, Supabase, Clerk, Resend, Gemini/Groq
 - **Decision:** Next.js on Vercel (single app), Supabase Postgres and Storage, Clerk for auth, Resend for email, Vercel Cron for jobs, Gemini or Groq for the HR assistant agent.
 - **Why:** managed services suit a 180-person company and a small team; one deployable app.
@@ -14,4 +19,6 @@ Format: date, decision, why, what it replaces.
 - **Why:** defined in `CLAUDE.md` by the owner.
 
 ## Pending
-- Confirm Goa as the reference state for statutory rules in `RESEARCH.md` (currently Karnataka).
+- Confirm which Goa Act applies (1973 or 2025) and its commencement date.
+- Replace the tentative 2026 holiday list with the official Goa notification.
+- Check Factories Act applicability for the Verna plant.

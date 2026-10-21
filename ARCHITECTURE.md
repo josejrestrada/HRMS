@@ -229,7 +229,7 @@ HRMS/
 
 - Source of punches: web check-in only, or biometric / device import at the Verna plant?
 - Shift patterns at the plant (shift work changes weekly offs and late-mark rules).
-- Goa-specific statutory leave and holiday rules (RESEARCH.md still uses Karnataka as the reference).
+- Which Goa Act applies (1973 or the 2025 Act) and whether the Verna plant also falls under the Factories Act (see RESEARCH.md section 5).
 - Whether restricted holidays are in v1.
 - Gemini vs Groq as the default agent model, and the data-handling terms of each.
 - Retention periods for ex-employee records and agent chats.

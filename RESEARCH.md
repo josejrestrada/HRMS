@@ -1,6 +1,6 @@
 # HRMS Research
 
-These are my notes on how HR works in Indian companies, written before I design the HRMS. I picked Karnataka for the Shops and Establishments Act question. Where I could not confirm a figure from a reliable source I say so, and anything statutory needs checking against the bare Act before the system goes live.
+These are my notes on how HR works in Indian companies, written before I design the HRMS. The system is for Konkan Coastal Foods in Goa (head office in Panaji, plant in Verna), so I studied Goa's Shops and Establishments law for the statutory question. Where I could not confirm a figure from a reliable source I say so, and anything statutory needs checking against the bare Act before the system goes live.
 
 ## 1. What an Indian HR team keeps for every employee
 
@@ -22,7 +22,7 @@ In the build, I will generate the code in the database, make it unique and immut
 
 ## 3. Leave types
 
-Casual leave (CL) covers short, unplanned personal needs of a day or two and is normally company policy. Sick leave (SL) covers illness, often needing a medical certificate for longer spells, and is also mostly policy, apart from ESI sickness benefit for covered staff. Earned or privilege leave (EL/PL) accrues with days worked and is statutory as annual leave with wages. For Karnataka the sources I found say one day for every 20 days worked, but they are compliance-site summaries and I want to check the Act itself.
+Casual leave (CL) covers short, unplanned personal needs of a day or two and is normally company policy. Sick leave (SL) covers illness, often needing a medical certificate for longer spells, and is also mostly policy, apart from ESI sickness benefit for covered staff. Earned or privilege leave (EL/PL) accrues with days worked and is statutory as annual leave with wages. In Goa the statute gives 15 days of earned leave a year (see section 5), but I read that in news and compliance summaries and want to check the Act text itself.
 
 Maternity leave is statutory under the Maternity Benefit Act 1961. It is 26 weeks for the first two children, with no more than 8 weeks before the expected delivery, and 12 weeks from the third child. Establishments with 50 or more employees must provide a creche. Paternity leave, typically 5 to 15 days, is company policy because there is no central private-sector law. Loss of pay (LOP) is not an entitlement at all, it is how unpaid absence is deducted from salary. Comp-off is time off in lieu of working on a weekly off or holiday, is policy, and usually expires after some weeks and needs approval.
 
@@ -36,21 +36,27 @@ Unused leave is handled in one of three ways. It can be carried forward, often w
 
 For the build, I will store leave as a ledger of credits and debits rather than a single number, so every balance can be explained. Accrual and year-end jobs will be safe to re-run, and carry-forward cap, lapse and encashment will be set per leave type.
 
-## 5. Karnataka Shops and Commercial Establishments Act, 1961
+## 5. Goa Shops and Establishments law
 
-The Act is often cited as the 1962 Act because it was Act 8 of 1962 and came into force on 1 October 1964, so sources name it differently.
+Goa has had the Goa, Daman and Diu Shops and Establishments Act, 1973. A news report says Goa notified a new law, the Goa Shops and Establishments (Regulation of Employment and Conditions of Service) Act, 2025 (Goa Act 23 of 2025), which received the Governor's assent on 19 September 2025 and was notified on 2 October 2025, replacing the 1973 Act. An official Goa text says the 1973 Act is repealed from the date the new Act commences, but I could not find that commencement date. So I do not know for certain which Act applies on any given day, and this has to be confirmed before launch. The rules below come from both sources and mostly agree.
 
-On working hours, the Act sets a maximum of 9 hours a day and 48 hours a week. A 2024 notification for certain establishments allows an 8-hour normal day with overtime up to 10 hours in total, and caps overtime at 50 hours over three months. I could not confirm whether that relaxation still applies, so it needs checking.
+On working hours, the 1973 Act limits work to 8 hours a day and 48 hours a week in shops, with overtime capped at 6 hours a week, and summaries mention a rest interval of at least one hour after five hours of work and a 12-hour spread-over. The 2025 Act, as reported, allows adults up to 10 hours a day or 48 hours a week, requires a rest break after five hours, caps overtime at 144 hours per quarter paid at double wages, and limits workers under 18 to 7 hours a day. Women may work outside the normal hours with their consent if the employer provides safety, protection from harassment and transport.
 
-On weekly offs, an establishment must close at least one day a week and employees must get a rest day. Some categories are exempt from the closing-day rule, including medical shops, general stores, theatres, petrol bunks, hotels, clubs and IT and biotech services, but their staff still need a weekly rest day, arranged by rotation.
+On weekly offs, both Acts say every worker must be allowed a weekly holiday with wages.
 
-On leave, the Act gives annual leave with wages at one day per 20 days worked, or one per 15 for young persons. I could not confirm from the sources I reached what it says about casual or sick leave, so I have not stated any figures. That is an open item, and I plan to read the bare Act and the Karnataka Labour Department notifications to settle it.
+On leave, both sources give the same numbers. A worker gets 9 days of sick leave and 6 days of casual leave each calendar year with wages, and unused sick and casual leave lapses at year end. A worker gets 15 days of earned leave, with accumulation allowed up to 45 days. Under the 1973 text, earned leave is earned by working 240 days or more in a calendar year and taken in the following year. The 2025 Act, as reported, also provides 9 paid holidays a year.
+
+Other points relevant to me: establishments with 20 or more workers follow the full rules (smaller ones only file an online intimation), a creche is required at 50 or more staff and a canteen at 100 or more. Konkan Coastal Foods has 180 employees and a plant, so the plant may also come under the Factories Act, which has its own hours and leave rules. I have not researched that and it is an open item.
+
+One compliance blog listed 12 days each of casual and sick leave and earned leave at one day per 20 days worked for Goa. That does not match the Act text or the other sources, so I am ignoring it.
 
 ## 6. National, restricted and state holidays
 
 National holidays are 26 January, 15 August and 2 October, and every employer observes them. State holidays are notified by each state every year under Section 25 of the Negotiable Instruments Act, 1881, and state labour laws can add to them, as Kerala's festival holidays law does. Which list applies depends on the state where the employee works, so holidays have to be configured per location. Restricted or optional holidays are a longer list of festival days from which an employee picks a small number a year, commonly two or three, and the count is set by company policy.
 
 Two caveats from my reading: banks close on the second and fourth Saturdays under the same section, and the Negotiable Instruments Act is really about when payment instruments mature, so a paid holiday for employees comes from shops and establishments or industrial holiday laws and the company's policy, not from that Act itself.
+
+For Goa, the state notified its 2026 public, restricted and special holidays on 13 October 2025, but I could not read the notification itself (the PDF would not extract). A compliance site lists these as the 8 public holidays for 2026, and it marks its dates as tentative: Republic Day (26 Jan), Dr Ambedkar Jayanti (14 Apr), May Day (1 May), Independence Day (15 Aug), Gandhi Jayanti (2 Oct), Feast of St Francis Xavier (3 Dec), Goa Liberation Day (19 Dec) and Christmas (25 Dec). Goa-specific days like Liberation Day and the Feast of St Francis Xavier are the state holidays here. Festival dates such as Holi and Eid differ between sources, so the real list must be copied from the official notification before I load it. Both Panaji and Verna are in Goa, so they share one calendar for now.
 
 In the build, I will keep a holiday calendar per location and year, with a type of national, state or restricted, and let restricted holidays use up an optional quota.
 
@@ -83,9 +89,9 @@ These are my own design choices, informed by the research above. The statutory n
 - **R5.** Only active employees can apply. Employees on probation get the same entitlements unless a leave type says otherwise.
 
 ### Entitlements
-- **R6.** Casual leave: 8 days a year, credited upfront on 1 January and pro-rated for joiners. It lapses at year end, cannot be encashed, and is limited to 3 consecutive days.
-- **R7.** Sick leave: 8 days a year, credited upfront and pro-rated for joiners. It lapses at year end, cannot be encashed, and needs a medical certificate beyond 2 consecutive days.
-- **R8.** Earned leave: 18 days a year, accruing 1.5 days a month, usable after 6 months of service. Up to 30 days carry forward, and anything above that is encashed at year end. Unused balance is also encashed on exit. The statutory floor of one day per 20 days worked always applies.
+- **R6.** Casual leave: 8 days a year (the Goa statutory minimum is 6, so the company policy is more generous), credited upfront on 1 January and pro-rated for joiners. It lapses at year end, cannot be encashed, and is limited to 3 consecutive days.
+- **R7.** Sick leave: 9 days a year, which is the Goa statutory amount, credited upfront and pro-rated for joiners. It lapses at year end, cannot be encashed, and needs a medical certificate beyond 2 consecutive days.
+- **R8.** Earned leave: 18 days a year, accruing 1.5 days a month. The Goa statutory floor is 15 days a year for an employee who works 240 days or more, with accumulation allowed up to 45 days, and that floor always applies. Up to 45 days carry forward, and anything above that is encashed at year end. Unused balance is also encashed on exit.
 - **R9.** Maternity leave: 26 weeks for the first two children and 12 weeks after that, with up to 8 weeks before the expected delivery. It is for female employees and counts calendar days.
 - **R10.** Paternity leave: 5 days for male employees, taken within 3 months of the birth.
 - **R11.** Comp-off: one day for each extra day worked on a weekly off or holiday, credited on manager approval, with prior approval required and an expiry of 60 days from credit.
@@ -106,7 +112,7 @@ These are my own design choices, informed by the research above. The statutory n
 
 ### Year end (31 December, safe to re-run)
 - **R22.** CL and SL balances lapse.
-- **R23.** EL carries forward up to 30 days and the excess is encashed at basic divided by 30 per day.
+- **R23.** EL carries forward up to 45 days and the excess is encashed at basic divided by 30 per day.
 - **R24.** Comp-off expires 60 days after it is credited, whatever the year.
 - **R25.** Every lapse, carry-forward and encashment is written to the ledger with a reason.
 
@@ -116,17 +122,22 @@ These are my own design choices, informed by the research above. The statutory n
 - **R28.** Missed punches must be regularized by the 5th of the next month, after which the day becomes LOP.
 
 ### Still to resolve
-- The exact Karnataka statutory casual and sick leave and any holiday entitlement.
+- Which Goa Act applies now (1973 or 2025) and its commencement date, and whether the plant in Verna is also covered by the Factories Act.
+- The official Goa 2026 holiday notification, to replace the tentative list in section 6.
+- Shift patterns at the plant, which change weekly offs and the late-mark rule.
 - Whether restricted holidays are in scope for the first version.
 - Whether the target company uses an April to March leave year instead.
 
 ## Sources
 
-- [Karnataka Shops and Establishment Act: Scope, Registration, Compliance (India Briefing)](https://www.india-briefing.com/news/karnataka-shops-establishment-act-19012.html/)
-- [Karnataka Shops and Establishments Act (Keka)](https://www.keka.com/compliance/acts/karnataka-shops-and-establishments-act)
-- [Karnataka Shops and Commercial Establishments Acts and Rules, PDF (Lawrbit)](https://www.lawrbit.com/wp-content/uploads/2020/08/karnataka-shops-and-commercial-establishment-acts-and-rules.pdf)
-- [The Karnataka Shops and Commercial Establishments Act, 1961 (Corrida Legal)](https://corridalegal.com/the-karnataka-shops-and-commercial-establishments-act-1961-executive-summary-and-bare-act/)
-- [JSA Prism, Employment, October 2024](https://www.jsalaw.com/newsletters-and-updates/jsa-prism-employment-october-2024-2/)
+- [Goa Shops and Establishments Act, 2025 notified (Digital Goa)](https://digitalgoa.com/goa-government-notifies-new-shops-and-establishments-act-2025-modernising-labour-regulations/)
+- [Goa, Daman and Diu Shops and Establishments Act, 1973 (India Code)](https://upload.indiacode.nic.in/view-casepdf?type=act&id=AC_GA_65_1387_00004_00004_1776852051253)
+- [Goa, Daman and Diu Shops and Establishments Act, 1973, notified text (Goa Labour Department)](https://labour.goa.gov.in/wp-content/uploads/2020/07/7475-31-SI-EOG-1-GDD-Shops-Establishment-Act-1973-31-10-1974.pdf)
+- [Goa Shops and Establishments Acts and Rules, PDF (Lawrbit)](https://www.lawrbit.com/wp-content/uploads/2020/08/goa-daman-and-diu-shops-and-establishments-acts-and-rules-daman-and-diu-state.pdf)
+- [Section 23, Goa, Daman and Diu Shops and Establishments Act (Indian Kanoon)](https://indiankanoon.org/doc/79837751/)
+- [Leave and working hours, Goa (Simpliance)](https://www.simpliance.in/India/LEI/working_hours/state-wise-leave-working-hours/goa)
+- [Goa government notifies 2026 public holidays (Goa Government)](https://www.goa.gov.in/wp-content/uploads/2025/10/GOVT-NOTIFIES-PUBLIC-HOLIDAYS.pdf)
+- [Goa holidays 2026 (greytHR)](https://www.greythr.com/wiki/acts/st-goa/holidays/2026/)
 - [National Holidays 2026 (LKS Employment Law)](https://employmentlaw.lkslaw.com/holidays)
 - [Public holiday for banks on 2nd and 4th Saturday (Taxheal)](https://www.taxheal.com/?p=1139)
 - [Kerala public holidays 2026 notification (TeamLease RegTech)](https://teamleaseregtech.com/updates/article/49079/government-of-kerala-declaration-of-public-holidays-in-kerala-for-the-/)
