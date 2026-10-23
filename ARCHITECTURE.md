@@ -28,17 +28,17 @@ How the Konkan Coastal Foods HRMS is built. Business rules live in [RESEARCH.md]
 | Layer | Choice | Why |
 |---|---|---|
 | App framework | Next.js (App Router, TypeScript) on Vercel | One codebase for UI and server code; simple deploys |
-| Database | Supabase (PostgreSQL) | Transactions, constraints and row locks for ledgers; managed backups |
+| Database | Neon (PostgreSQL), pooled connection via `@neondatabase/serverless` | Transactions, constraints and row locks for ledgers; branches for dev and staging; point-in-time restore |
 | Auth | Clerk | Hosted sign-in, sessions and user management; roles stored in Clerk metadata and mirrored in the database |
 | Email | Resend | Approval and reminder emails |
 | Scheduled jobs | Vercel Cron calling protected route handlers | Monthly accrual, year-end, escalations, reminders |
-| File storage | Supabase Storage (private buckets) | Medical certificates and documents, served by signed URLs |
+| File storage | Private S3 bucket in Mumbai with signed URLs (proposed, not yet decided) | Neon has no storage; medical certificates and documents need a private home |
 | Agent LLM | Gemini or Groq via their APIs | HR assistant (section 8) |
 | Validation | Zod | Same schemas for forms and server inputs |
 | Tests | Vitest, Playwright | Rule logic and end-to-end flows |
 | CI | GitHub Actions | Lint, typecheck, test, build on every PR |
 
-Regions: Supabase project in Mumbai (ap-south-1) and Vercel functions pinned to the Mumbai region (`bom1`) to keep data and compute in India and latency low.
+Regions: Neon has no Mumbai region, so the database goes in Singapore (`aws-ap-southeast-1`) and Vercel functions are pinned to `sin1` to keep app and database close. Employee data therefore sits outside India; confirm this is acceptable (DPDP, company policy) before real data is loaded. See docs/decisions.md.
 
 ## 3. System overview
 
@@ -47,14 +47,14 @@ flowchart LR
     U[Employee / Manager / HR<br/>browser] --> N[Next.js app on Vercel<br/>pages + server actions + route handlers]
     U -->|sign-in| C[Clerk]
     N -->|verify session| C
-    N -->|server-only DB access| DB[(Supabase Postgres)]
-    N --> ST[(Supabase Storage)]
+    N -->|server-only DB access| DB[(Neon Postgres)]
+    N --> ST[(Private file storage)]
     N --> R[Resend]
     N --> LLM[Gemini / Groq]
     CR[Vercel Cron] -->|signed request| N
 ```
 
-**Style: modular monolith.** All logic runs on the server side of one Next.js app. The browser never talks to the database directly. The database is reached only from server code using the Supabase service credentials, and every request is authorised in server code before any query runs.
+**Style: modular monolith.** All logic runs on the server side of one Next.js app. The browser never talks to the database directly. The database is reached only from server code using the Neon connection string held in server environment variables, and every request is authorised in server code before any query runs.
 
 ## 4. Modules
 
@@ -131,7 +131,7 @@ erDiagram
 
 1. **Leave balance is a ledger.** A balance is `SUM(delta)` per employee and type. Submitting a request writes a hold; approval converts it to a debit in the same transaction, and rejection or cancellation releases it. Credits that expire (comp-off) are consumed earliest-expiry first (P4).
 2. **Server-side authorization with the database as the source of roles.** Clerk proves identity only. Every request loads the current employee, roles and assignment from the database; no role claim in a token is trusted, and deactivating an employee blocks access at once (P2). Sign-up is invite-only: HR creates the employee row, the invite is accepted with a verified email, then `clerk_user_id` is linked. Unlinked Clerk users have no access. Approval rules: nobody approves their own request; a requester with no manager, or whose manager is the requester, goes to HR; HR's own requests go to a designated second approver. Hiding a button is never the control.
-3. **One enforced data-access layer (P3).** All database access goes through each module's data-access functions, which require the acting user and apply scoping inside the query (own data, direct reports, everyone). Routes, server actions and server components never import the database client; a lint rule and a CI check enforce this, and every new endpoint ships with a permission test. Row Level Security stays enabled on all tables with no public policies as a second barrier, and the service credential lives only in server environment variables.
+3. **One enforced data-access layer (P3).** All database access goes through each module's data-access functions, which require the acting user and apply scoping inside the query (own data, direct reports, everyone). Routes, server actions and server components never import the database client; a lint rule and a CI check enforce this, and every new endpoint ships with a permission test. The app connects with a non-owner application role that has only the privileges it needs (UPDATE and DELETE revoked on ledger and audit tables), Row Level Security stays enabled as a second barrier, and the connection string lives only in server environment variables.
 4. **Concurrency.** Approving or applying leave locks the employee's balance row for that leave type (`SELECT ... FOR UPDATE`) inside a transaction so two requests cannot spend the same day. These operations are implemented as Postgres functions (called via RPC) or transactions with explicit locks, since serverless functions are stateless.
 5. **Idempotent jobs.** Each cron run is keyed by job + employee + period in `job_run` and `ref_id`; rerunning creates no duplicates. Cron routes verify a secret and are safe to retry.
 6. **Policy as data.** Quotas, caps and thresholds come from `leave_type` and an attendance policy row, with effective dates so old calculations remain reproducible.
@@ -170,13 +170,13 @@ erDiagram
 
 - **Authentication:** Clerk handles passwords, MFA options and sessions, with invite-only sign-up. Server code verifies the session on every request and then loads roles from the database (P2).
 - **Authorization:** role-based plus relationship checks. Employees see their own data, managers their direct reports, HR everyone, and only designated roles see employee_private. Checks sit in the shared permission module and are tested.
-- **Data protection:** TLS, Supabase encryption at rest, application-level encryption of PAN / UAN / bank / salary fields with a key kept separate from the database credentials and versioned for rotation, no storage of the full Aadhaar number (last 4 digits only), a blind index on PAN, masking in all API responses and UI. Reveal is enforced on the server, rate limited and audited, and fails if the audit write fails (P7).
-- **Secrets:** only in Vercel and Supabase environment settings. `.env` files are git-ignored and never committed. Server-only keys are never exposed with the `NEXT_PUBLIC_` prefix.
+- **Data protection:** TLS, Neon encryption at rest, application-level encryption of PAN / UAN / bank / salary fields with a key kept separate from the database credentials and versioned for rotation, no storage of the full Aadhaar number (last 4 digits only), a blind index on PAN, masking in all API responses and UI. Reveal is enforced on the server, rate limited and audited, and fails if the audit write fails (P7).
+- **Secrets:** only in Vercel environment settings (and your password manager). `.env` files are git-ignored and never committed. Server-only keys are never exposed with the `NEXT_PUBLIC_` prefix.
 - **Logging:** no personal identifiers or tokens in logs.
 - **Audit:** append-only `audit_log` for changes, sensitive reads and agent tool calls.
 - **DPDP alignment:** minimal collection, recorded purpose, correction and access requests, retention rules for ex-employees, breach response steps.
 - **Application security:** parameterised queries only, output encoding by React, CSRF protection for server actions, security headers, dependency scanning in CI.
-- **Backups:** Supabase daily backups; a restore drill is part of hardening. Destructive database operations (reset, truncate, dropping tables) require explicit approval from the owner.
+- **Backups:** Neon point-in-time restore (window depends on plan); a restore drill is part of hardening. Destructive database operations (reset, truncate, dropping tables) require explicit approval from the owner.
 
 ## 10. Reports
 
@@ -195,7 +195,7 @@ HRMS/
       reports/
       agent/
     shared/                   auth, permissions, audit, dates (IST), email, errors
-  supabase/
+  db/
     migrations/               versioned SQL migrations
     seed.sql
   docs/
@@ -208,22 +208,22 @@ HRMS/
 ## 12. Testing strategy
 
 - **Unit tests** (Vitest) for rule logic: pro-rating (R13), EL accrual with LOP (R14), working-day counting (R3), late and half-day thresholds (R26, R27), IST date boundaries.
-- **Integration tests** against a local Supabase / Postgres for ledger writes, overlap checks, locking, and cron idempotency (run twice, no duplicate rows).
+- **Integration tests** against a Neon test branch or local Postgres for ledger writes, overlap checks, locking, and cron idempotency (run twice, no duplicate rows).
 - **Permission tests:** an employee cannot read another's data; managers only their reports; masking works; the agent cannot return what the user cannot see.
 - **End-to-end** (Playwright): apply, approve, cancel, regularize, and one agent conversation.
 - CI runs lint, typecheck and tests on every pull request.
 
 ## 13. Deployment and operations
 
-- Vercel for the app (preview deployment per PR, production from `main`); Supabase for the database. Separate Supabase projects for development, staging and production.
-- Migrations are forward-only SQL files in `supabase/migrations`, applied by a release step, with a backup before production runs. No database reset against any shared environment.
+- Vercel for the app (preview deployment per PR, production from `main`); Neon for the database, with separate branches for development and staging and production kept apart.
+- Migrations are forward-only SQL files in `db/migrations`, applied by a release step, with a backup before production runs. No database reset against any shared environment.
 - Scheduled jobs (Vercel Cron, times in UTC with IST noted): monthly EL accrual (last day of month), year-end run (31 Dec), comp-off expiry (daily), approval escalation (daily), regularization reminders (daily), month lock (after payroll cut-off).
 - Monitoring: Vercel logs and error tracking, alerts on failed cron jobs, Resend delivery status.
 - Limits to watch: Vercel function duration and plan-level cron limits (so jobs are chunked), Clerk and Resend free-tier quotas, LLM rate limits. At 180 employees these are comfortable.
 
 ## 14. Delivery phases
 
-1. **Foundation:** repo, CI, Supabase schema, Clerk, roles, permission module, audit log, IST helpers.
+1. **Foundation:** repo, CI, Neon schema and application role, Clerk, roles, permission module, audit log, IST helpers.
 2. **Employee Master:** employees, codes, org structure, masked sensitive fields.
 3. **Leave:** leave types config, holidays for Panaji and Verna, ledger, apply / approve / cancel, accrual and year-end jobs, balance statement.
 4. **Attendance:** punches, derived status, regularization, WFH, month lock.

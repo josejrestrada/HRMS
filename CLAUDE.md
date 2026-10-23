@@ -3,7 +3,7 @@
 HR system for Konkan Coastal Foods (180 employees; head office in Panaji, plant in Verna, Goa). It covers Employee Master, Attendance, Leave and an HR assistant agent.
 
 ## Stack
-Next.js on Vercel, Supabase, Clerk, Resend for email, Gemini/Groq for the agent.
+Next.js on Vercel, Neon (Postgres), Clerk, Resend for email, Gemini/Groq for the agent.
 
 ## Rules
 - Business rules are in `RESEARCH.md` and `docs/requirements.pdf`. Follow them exactly.

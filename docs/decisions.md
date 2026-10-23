@@ -31,6 +31,20 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## Accepted
 
+## 2026-10-23 - Database is Neon (Postgres), not Supabase
+- **Status:** Accepted (2026-10-23, owner)
+- **Decision:** use Neon for PostgreSQL. Supabase is dropped. The app connects only from server code with a Neon connection string (pooled) using a restricted application role, not the database owner.
+- **Consequences:**
+  - **Region:** Neon has no Mumbai region. The closest is Singapore (`aws-ap-southeast-1`), and a project's region cannot be changed later. Proposed: create the Neon project in Singapore and pin Vercel functions to `sin1` so the app and database are close. Data therefore sits outside India; confirm this is acceptable under the DPDP Act and company policy before real employee data goes in. Until then use only test data.
+  - **File storage:** Neon has no storage service, so medical certificates and documents need another home. Proposed: a private S3 bucket in Mumbai (`ap-south-1`) with short-lived signed URLs. Not decided; leave attachments are not built until it is.
+  - **Transactions and locks:** use the pooled connection with the `@neondatabase/serverless` pool driver, which supports interactive transactions (`SELECT ... FOR UPDATE`).
+  - **Access control (affects P3):** the "service key bypasses RLS" risk becomes "the connection role can read everything". Use a non-owner application role with minimal privileges, UPDATE and DELETE revoked on ledger and audit tables, and RLS as a second barrier. The data-access layer rule in P3 stands unchanged.
+  - **Migrations:** plain forward-only SQL files in `db/migrations` (tool to be chosen, for example dbmate). `supabase/` folder is removed from the planned layout.
+  - **Environments:** use Neon branches for development and staging, with production on its own branch or project. Never reset or restore a shared branch without asking.
+  - **Backups:** Neon point-in-time restore window depends on the plan; check it before go-live.
+- **Replaces:** Supabase Postgres and Storage in the 2026-10-21 stack decision.
+- **Updated:** `CLAUDE.md`, `ARCHITECTURE.md`, `.env.example`, `vercel.json`, `README.md`, dependencies.
+
 ## 2026-10-23 - P2 - Identity linking and roles
 - **Status:** Accepted (2026-10-23)
 - **Problem:** roles live in Clerk metadata and in `employee.role`; linking by email can be spoofed; one role per person; stale sessions keep removed access; no rule against self-approval.
@@ -44,7 +58,7 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## 2026-10-23 - P3 - One enforced data-access layer
 - **Status:** Accepted (2026-10-23)
-- **Problem:** server code uses the Supabase service key, which bypasses RLS, so one missing check leaks data.
+- **Problem:** server code uses a privileged database credential (originally the Supabase service key), which bypasses RLS, so one missing check leaks data.
 - **Proposal:** all database access goes through a data-access layer in each module that requires an `actor` argument and applies scoping inside the query. Route handlers, server actions and server components never import the database client directly (enforced by a lint rule and a CI check). Each new endpoint ships with a permission test. Keep RLS enabled with no public policies as a second barrier, and consider a restricted database role per module later.
 - **Affects:** ARCHITECTURE section 6 (decisions 2 and 3), CLAUDE.md rules, testing strategy.
 
