@@ -6,7 +6,7 @@ These are my notes on how HR works in Indian companies, written before I design 
 
 HR teams usually record a person's identity details (full name as on PAN and Aadhaar, date of birth, gender, marital status, photo), contact details (personal and work email, mobile number, current and permanent address, an emergency contact), and employment details (employee code, designation, department, grade, reporting manager, joining date, employment type, work location, confirmation date, notice period and exit date). They also keep statutory IDs, payroll details such as bank account, IFSC and salary structure, background information like education and previous employers, and family information such as nominees for PF and gratuity.
 
-Some of this is effectively mandatory because payroll cannot run legally without it. PAN is needed for TDS on salary, and bank details are needed to pay it. The UAN is mandatory for employers covered by the EPF Act and stays with the employee for life across jobs. Since August 2025 it is generated and activated through the UMANG app using Aadhaar face authentication, though I only found that in secondary sources. Aadhaar ties into UAN activation and PAN linking, but a company should collect it only where it is lawfully needed. ESI numbers apply only to employees under the ESI wage ceiling.
+Some of this is effectively mandatory because payroll cannot run legally without it. PAN is needed for TDS on salary, and bank details are needed to pay it. The UAN is mandatory for employers covered by the EPF Act and stays with the employee for life across jobs. Since August 2025 it is generated and activated through the UMANG app using Aadhaar face authentication, though I only found that in secondary sources. Aadhaar ties into UAN activation and PAN linking, but a company should collect it only where it is lawfully needed. For this system I decided not to store the full Aadhaar number at all, only the last 4 digits and a verified flag (decision P7). ESI numbers apply only to employees under the ESI wage ceiling.
 
 The sensitive fields are Aadhaar, PAN, bank account number, salary, date of birth, medical and disability information, marital and family details, background-check results and disciplinary records. Under the DPDP Act 2023 the employer is a data fiduciary and the employee is a data principal. Processing for employment is treated as a legitimate use, so explicit consent is not always needed, but it has to be limited to what is necessary. I did not manage to verify the penalty figure quoted online (up to Rs 250 crore).
 
@@ -83,7 +83,7 @@ These are my own design choices, informed by the research above. The statutory n
 
 ### General rules
 - **R1.** The leave year runs from 1 January to 31 December. Leave is counted in days, with half a day as the smallest unit.
-- **R2.** Balances are a ledger of credits and debits, and the displayed balance is the sum of the ledger.
+- **R2.** Balances are a ledger of credits and debits, and the displayed balance is the sum of the ledger. Days held by pending requests reduce the available balance.
 - **R3.** Weekly offs (Saturday and Sunday by default, configurable per location) and holidays inside a leave range are not counted as leave days. Maternity leave is the exception and counts calendar days.
 - **R4.** For each leave type, the more generous of the statute and company policy applies.
 - **R5.** Only active employees can apply. Employees on probation get the same entitlements unless a leave type says otherwise.
@@ -92,9 +92,9 @@ These are my own design choices, informed by the research above. The statutory n
 - **R6.** Casual leave: 8 days a year (the Goa statutory minimum is 6, so the company policy is more generous), credited upfront on 1 January and pro-rated for joiners. It lapses at year end, cannot be encashed, and is limited to 3 consecutive days.
 - **R7.** Sick leave: 9 days a year, which is the Goa statutory amount, credited upfront and pro-rated for joiners. It lapses at year end, cannot be encashed, and needs a medical certificate beyond 2 consecutive days.
 - **R8.** Earned leave: 18 days a year, accruing 1.5 days a month. The Goa statutory floor is 15 days a year for an employee who works 240 days or more, with accumulation allowed up to 45 days, and that floor always applies. Up to 45 days carry forward, and anything above that is encashed at year end. Unused balance is also encashed on exit.
-- **R9.** Maternity leave: 26 weeks for the first two children and 12 weeks after that, with up to 8 weeks before the expected delivery. It is for female employees and counts calendar days.
-- **R10.** Paternity leave: 5 days for male employees, taken within 3 months of the birth.
-- **R11.** Comp-off: one day for each extra day worked on a weekly off or holiday, credited on manager approval, with prior approval required and an expiry of 60 days from credit.
+- **R9.** Maternity leave: 26 weeks for the first two children and 12 weeks after that, with up to 8 weeks before the expected delivery. It is for female employees and counts calendar days. It is tracked on the request itself (expected delivery date, child count, eligibility), not as a day balance.
+- **R10.** Paternity leave: 5 days for male employees, taken within 3 months of the birth. Like maternity, it is tracked on the request (birth date), not as a day balance.
+- **R11.** Comp-off: one day for each extra day worked on a weekly off or holiday, credited on manager approval, with prior approval required and an expiry of 60 days from credit. The employee raises a comp-off request, and the credit goes into the ledger on approval with its own expiry date. When leave is taken, the earliest-expiring credit is used first.
 - **R12.** Loss of pay is unlimited and unpaid, and is used when the balance is insufficient.
 
 ### Accrual and pro-rating
@@ -105,7 +105,7 @@ These are my own design choices, informed by the research above. The statutory n
 ### Applying and approving
 - **R16.** An application states the type, start date, end date, whether it is a half day (first or second half) and a reason.
 - **R17.** An application is rejected if it overlaps another approved or pending leave for the same employee.
-- **R18.** An application is rejected if the balance is insufficient, unless the employee chooses to convert the shortfall to LOP.
+- **R18.** An application is rejected if the balance is insufficient, unless the employee chooses to convert the shortfall to LOP. A submitted request holds its days; approval turns the hold into a debit, and rejection or cancellation releases it.
 - **R19.** Backdated applications are accepted up to 7 days. Older ones need HR approval.
 - **R20.** The manager approves or rejects. If nothing happens within 5 working days it escalates to HR. Cancelling an approved leave restores the balance.
 - **R21.** Approved leave cannot be edited. It must be cancelled and re-applied.
@@ -120,6 +120,12 @@ These are my own design choices, informed by the research above. The statutory n
 - **R26.** There is a 15-minute grace window. Three late marks in a month deduct half a day, from CL first and then LOP.
 - **R27.** Under 4.5 hours worked is absent unless leave is applied, 4.5 hours up to 8 hours is a half day, and 8 hours or more is present. Approved work from home counts as present.
 - **R28.** Missed punches must be regularized by the 5th of the next month, after which the day becomes LOP.
+
+### Amendments from accepted decisions (see docs/decisions.md)
+- **R29.** Employee codes that already exist are kept exactly as issued when the 180 current employees are imported. New codes continue after the highest existing number.
+- **R30.** Opening leave balances are imported once, as ledger rows with reason `opening_balance`, dated at the cut-over date, from a file reviewed and reconciled by HR before go-live.
+- **R31.** Nobody approves their own request. A request from someone with no manager goes to HR, and HR's own requests go to a designated second approver.
+- **R32.** Which holidays, weekly offs and approver apply to a day is decided by the employee's location and manager assignment effective on that day, not the current one.
 
 ### Still to resolve
 - Which Goa Act applies now (1973 or 2025) and its commencement date, and whether the plant in Verna is also covered by the Factories Act.

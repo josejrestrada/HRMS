@@ -97,6 +97,9 @@ erDiagram
     EMPLOYEE ||--o{ ATTENDANCE_DAY : has
     EMPLOYEE }o--|| LOCATION : works_at
     EMPLOYEE }o--o| EMPLOYEE : reports_to
+    EMPLOYEE ||--o{ EMPLOYMENT_ASSIGNMENT : history
+    EMPLOYEE ||--o{ EMPLOYEE_ROLE : holds
+    EMPLOYEE ||--o{ COMPOFF_REQUEST : raises
     LOCATION ||--o{ HOLIDAY : observes
     LEAVE_TYPE ||--o{ LEAVE_LEDGER : classifies
     LEAVE_TYPE ||--o{ LEAVE_REQUEST : classifies
@@ -106,13 +109,16 @@ erDiagram
 
 | Entity | Key fields and notes |
 |---|---|
-| **employee** | `id` (UUID), `employee_code` (unique, from a DB sequence, never updated), name, DOB, gender, joining date, exit date, status, employment type, `location_id`, `manager_id`, department, `clerk_user_id`, `role`. Never hard-deleted; set inactive instead (RESEARCH.md section 2). |
-| **employee_private** | PAN, Aadhaar, UAN, bank account, IFSC, salary. Encrypted at the application layer. Every read of a full value is audited. |
+| **employee** | `id` (UUID), `employee_code` (unique, immutable: existing codes imported as issued, new ones from a sequence that continues after the highest code, per P6), name, DOB, gender, joining date, exit date, status, `clerk_user_id` (set only after a verified invite is accepted, per P2). Current location, manager, department and employment type are read from the open `employment_assignment` row. Never hard-deleted; set inactive instead (RESEARCH.md section 2). |
+| **employment_assignment** | Effective-dated history (P5): employee, location, department, manager, grade, employment type, `effective_from`, `effective_to` (null for the current row). No overlaps per employee; no reporting loops. Holidays, weekly offs, approvers and reports resolve the row effective on the date in question. |
+| **employee_role / role** | An employee can hold several roles (employee, HR admin, system admin; manager is derived from reporting lines). The database is the only source of roles (P2). |
+| **employee_private** | PAN, UAN, bank account, IFSC, salary, encrypted at the application layer with a key held outside the database credentials and a key version per row (P7). PAN also has a keyed hash (blind index) for de-duplication. Aadhaar: only the last 4 digits and a verified flag; the full number is not stored (P7). Every read of a full value is audited. |
 | **location** | Panaji head office, Verna plant. Name, state, weekly-off pattern, timezone. Drives which holiday list applies. |
 | **holiday** | `location_id`, date, name, type (national / state / restricted). Unique per (location, date). |
 | **leave_type** | Code (CL, SL, EL, MAT, PAT, COMPOFF, LOP), accrual mode, quota, carry-forward cap, encashable, max consecutive days, gender restriction, expiry days, statutory floor, effective-from. Rules R6 to R12 live here as data. |
-| **leave_ledger** | Append-only: `employee_id`, `leave_type_id`, `entry_date`, `delta` (half-day steps), `reason` (accrual, application, cancellation, lapse, carry_forward, encashment, expiry, adjustment), `ref_id`. Balance = sum (R2, R25). Never updated or deleted; fixes are new rows. |
-| **leave_request** | Employee, type, start, end, half-day flag and half, reason, status (pending / approved / rejected / cancelled), approver, decided at, attachment path. |
+| **leave_ledger** | Append-only (P4): `employee_id`, `leave_type_id`, `leave_year`, `entry_date`, `delta` as `numeric(5,1)` in half-day steps, `reason` (accrual, opening_balance, pending_hold, hold_release, application, cancellation, lapse, carry_forward, encashment, expiry, adjustment), `expires_on` (on credits that expire), `consumes_entry_id` (debits consume the earliest-expiring credit first), `ref_id`. Balance = sum of non-hold rows (R2, R25); available = balance minus open holds. UPDATE and DELETE are revoked at database level; fixes are new rows. |
+| **leave_request** | Employee, type, start, end, half-day flag and half, reason, status (pending / approved / rejected / cancelled), approver, decided at, attachment path. Maternity and paternity requests also carry expected delivery or birth date and child count and are checked for eligibility; they are tracked on the request, not as a day balance (P4). |
+| **compoff_request** | Employee, worked date, reason, status. Approval writes a ledger credit with its own `expires_on` (R11, P4). |
 | **punch** | Employee, timestamp (stored UTC), direction, source. Immutable. |
 | **attendance_day** | Employee, date, derived status (present / half_day / absent / leave / holiday / weekly_off / wfh), first in, last out, hours, late flag, `locked`. |
 | **regularization** | Day, requested status or times, reason, status, approver. Approving changes `attendance_day`, never `punch` (R28). |
@@ -123,17 +129,17 @@ erDiagram
 
 ## 6. Key design decisions
 
-1. **Leave balance is a ledger.** A balance is `SUM(delta)` per employee and type. Applying leave writes a debit in the same transaction as the approval; cancelling writes an offsetting credit.
-2. **Server-side authorization.** Every server action and route handler calls a shared permission check (identity from Clerk, role and relationships from the database) before touching data. Hiding a button is never the control. Where possible, database access functions take the acting user so scoping (own data, direct reports, everyone) is applied in the query.
-3. **Defence in depth in the database.** Row Level Security is enabled on all tables with no policies granting access to the public (anon) role, so a leaked public key reads nothing. The service credential lives only in server environment variables.
+1. **Leave balance is a ledger.** A balance is `SUM(delta)` per employee and type. Submitting a request writes a hold; approval converts it to a debit in the same transaction, and rejection or cancellation releases it. Credits that expire (comp-off) are consumed earliest-expiry first (P4).
+2. **Server-side authorization with the database as the source of roles.** Clerk proves identity only. Every request loads the current employee, roles and assignment from the database; no role claim in a token is trusted, and deactivating an employee blocks access at once (P2). Sign-up is invite-only: HR creates the employee row, the invite is accepted with a verified email, then `clerk_user_id` is linked. Unlinked Clerk users have no access. Approval rules: nobody approves their own request; a requester with no manager, or whose manager is the requester, goes to HR; HR's own requests go to a designated second approver. Hiding a button is never the control.
+3. **One enforced data-access layer (P3).** All database access goes through each module's data-access functions, which require the acting user and apply scoping inside the query (own data, direct reports, everyone). Routes, server actions and server components never import the database client; a lint rule and a CI check enforce this, and every new endpoint ships with a permission test. Row Level Security stays enabled on all tables with no public policies as a second barrier, and the service credential lives only in server environment variables.
 4. **Concurrency.** Approving or applying leave locks the employee's balance row for that leave type (`SELECT ... FOR UPDATE`) inside a transaction so two requests cannot spend the same day. These operations are implemented as Postgres functions (called via RPC) or transactions with explicit locks, since serverless functions are stateless.
 5. **Idempotent jobs.** Each cron run is keyed by job + employee + period in `job_run` and `ref_id`; rerunning creates no duplicates. Cron routes verify a secret and are safe to retry.
 6. **Policy as data.** Quotas, caps and thresholds come from `leave_type` and an attendance policy row, with effective dates so old calculations remain reproducible.
 7. **Raw vs derived attendance.** Punches are facts; `attendance_day` is recomputed from punches, leave, holidays and WFH, and frozen by the month lock.
 8. **More generous of statute and policy.** Entitlement is `max(policy, statutory_floor)` per type (R4, R8).
-9. **Immutable employee code.** Generated by a sequence, UPDATE revoked on the column (trigger as backup), absent from every update schema.
+9. **Immutable employee code.** Existing codes are kept as issued at import; new codes come from a sequence that continues after the highest numeric code. UPDATE is revoked on the column (trigger as backup) and it is absent from every update schema (P6).
 10. **IST everywhere.** Timestamps stored as UTC and converted with `Asia/Kolkata` for any date logic (late marks, month boundaries, cron schedules). Leave and holiday dates are plain `date` values. Vercel Cron runs in UTC, so schedules are written as UTC equivalents of the IST times (for example 00:30 IST = 19:00 UTC the previous day), with the conversion documented next to each schedule. All date helpers live in one shared module so no code relies on the server's local time.
-11. **Location-based holidays.** Holidays and weekly offs come from the employee's location, for example Panaji or Verna, with Goa's calendar (R3).
+11. **Location-based holidays.** Holidays and weekly offs come from the location on the employee's assignment effective on that date, for example Panaji or Verna, with Goa's calendar (R3, P5).
 12. **Serverless-friendly.** No in-memory state or long-running processes. Long work is split into small cron-triggered batches per employee chunk.
 
 ## 7. Request flow example: apply for leave
@@ -162,9 +168,9 @@ erDiagram
 
 ## 9. Security and privacy
 
-- **Authentication:** Clerk handles passwords, MFA options and sessions. Server code verifies the session on every request.
+- **Authentication:** Clerk handles passwords, MFA options and sessions, with invite-only sign-up. Server code verifies the session on every request and then loads roles from the database (P2).
 - **Authorization:** role-based plus relationship checks. Employees see their own data, managers their direct reports, HR everyone, and only designated roles see employee_private. Checks sit in the shared permission module and are tested.
-- **Data protection:** TLS, Supabase encryption at rest, application-level encryption of PAN / Aadhaar / bank fields with a key from environment secrets, masking in all API responses and UI.
+- **Data protection:** TLS, Supabase encryption at rest, application-level encryption of PAN / UAN / bank / salary fields with a key kept separate from the database credentials and versioned for rotation, no storage of the full Aadhaar number (last 4 digits only), a blind index on PAN, masking in all API responses and UI. Reveal is enforced on the server, rate limited and audited, and fails if the audit write fails (P7).
 - **Secrets:** only in Vercel and Supabase environment settings. `.env` files are git-ignored and never committed. Server-only keys are never exposed with the `NEXT_PUBLIC_` prefix.
 - **Logging:** no personal identifiers or tokens in logs.
 - **Audit:** append-only `audit_log` for changes, sensitive reads and agent tool calls.
@@ -223,7 +229,8 @@ HRMS/
 4. **Attendance:** punches, derived status, regularization, WFH, month lock.
 5. **Notifications and reports:** Resend emails, escalation, reports and CSV export.
 6. **HR assistant agent:** tools, guardrails, chat UI.
-7. **Hardening:** security review, restore drill, pilot with a real team.
+7. **Go-live import:** audited one-time import of existing employees (with their existing codes) and opening balances as ledger rows, rehearsed in staging and reconciled by HR before production (P6).
+8. **Hardening:** security review, restore drill, pilot with a real team.
 
 ## 15. Open questions
 
@@ -234,3 +241,5 @@ HRMS/
 - Gemini vs Groq as the default agent model, and the data-handling terms of each.
 - Retention periods for ex-employee records and agent chats.
 - Leave year: January to December (assumed) or April to March.
+- Current employee code format, cut-over date and source of current balances (needed for the go-live import, P6).
+- Shift and weekly-off model for the Verna plant (decision P1, still proposed).

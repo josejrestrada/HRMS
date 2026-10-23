@@ -32,6 +32,7 @@ Home (role-aware dashboard)
 │   ├── Apply for leave
 │   ├── My balances  →  Statement per leave type
 │   ├── My requests
+│   ├── Comp-off request
 │   └── Team calendar (manager/HR)
 ├── Attendance
 │   ├── My month
@@ -57,7 +58,7 @@ Navigation: left sidebar on desktop, bottom tab bar (Home, Leave, Attendance, Ap
 
 ### 4.1 Employee home
 - Greeting and today's status (checked in, WFH, on leave, holiday).
-- **Balance cards** for CL, SL, EL (and others the person is eligible for), each showing available days and a "View statement" link.
+- **Balance cards** for CL, SL, EL (and others the person is eligible for), each showing available days (balance minus days held by pending requests) and a "View statement" link.
 - **Upcoming** list: next holiday for my location, approved leave, pending requests.
 - Primary actions: **Apply leave**, **Regularize**.
 - Banner when something needs attention, for example "3 days need regularization before the 5th".
@@ -83,9 +84,10 @@ Behaviour:
 - Overlap, insufficient balance and backdating limits are shown inline before submit (R17 to R19).
 - If balance is short, the form offers "Use 1 day as leave without pay (LOP)" as an explicit choice (R18), never silently.
 - Half-day: choose first or second half.
+- Submitting reserves the days as a hold, so another request cannot use them while this one is pending. Maternity and paternity requests ask for the expected delivery or birth date and child count instead of showing a day balance.
 
 ### 4.3 Balance statement
-A table of every ledger entry for a leave type: date, description (Monthly accrual, Leave applied 22-23 Oct, Lapsed at year end, Carry forward, Encashment), credit, debit, running balance. Filter by year. A reader should be able to explain any change without asking HR (R2, R25).
+A table of every ledger entry for a leave type: date, description (Monthly accrual, Leave applied 22-23 Oct, Lapsed at year end, Carry forward, Encashment), credit, debit, hold, expiry date where one applies, and running balance. Filter by year. A reader should be able to explain any change without asking HR (R2, R25).
 
 ### 4.4 My requests
 List with status chips (Pending, Approved, Rejected, Cancelled), dates, type, days. Pending and future approved requests have a Cancel action; approved requests cannot be edited (R21). Each request shows its timeline: submitted, decided by whom, when, and the comment.
@@ -110,11 +112,19 @@ Month view with one row per team member and coloured bars for leave, WFH and hol
 
 ### 4.10 Employee profile (HR)
 Tabs: **Overview** (employment details, employee code shown read-only with a lock icon and tooltip "Employee codes never change"), **Personal**, **Statutory and bank**, **Leave**, **Attendance**, **Documents**, **History**.
-- PAN, Aadhaar, bank and salary appear masked (`XXXX XXXX 1234`). A **Reveal** button asks for confirmation, shows the value for a short time, and writes an audit entry.
+- PAN, bank and salary appear masked. Aadhaar is never stored in full: the profile shows only the last 4 digits (`XXXX XXXX 1234`) and a verified flag. A **Reveal** button for the other fields asks for confirmation, shows the value for a short time, and writes an audit entry; the server enforces the role, rate-limits it, and refuses if the audit write fails.
 - Employees are deactivated, not deleted; the profile shows status and exit date.
+- The **History** tab lists each assignment (location, department, manager, grade, type) with its effective dates, so transfers and manager changes are visible.
+- Inviting an employee to sign in is a button here; the profile shows invite status and whether the sign-in account is linked.
 
 ### 4.11 Admin: leave types and policy
 A form per leave type: quota, accrual mode, carry-forward cap, encashment, max consecutive days, eligibility, expiry. Changing a value requires an effective-from date and shows a preview of who is affected. Statutory minimums are shown next to the field and block values below them (R4).
+
+### 4.12 Comp-off request
+A short form: the date worked on a weekly off or holiday, and a reason. It goes to the manager; on approval a credit appears in the CL/comp-off statement with its expiry date (R11). The statement shows days left before expiry, and the home screen warns when a credit expires within 14 days.
+
+### 4.13 Roles (HR and system admin)
+List of employees with their roles. Adding or removing a role asks for confirmation and is audited. Manager status is not a role: it comes from reporting lines. The screen warns if a reporting loop would be created and when someone's approver would be themselves.
 
 ## 5. Key user flows
 
