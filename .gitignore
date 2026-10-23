@@ -1,5 +1,27 @@
+# macOS
 .DS_Store
+
+# dependencies
 node_modules/
+
+# next.js
+.next/
+out/
+next-env.d.ts
+
+# environment files: keep every real env file out of git, only the example is tracked
 .env
 .env.*
 !.env.example
+
+# vercel
+.vercel/
+
+# logs and tooling
+*.log
+npm-debug.log*
+*.tsbuildinfo
+coverage/
+
+# local Claude settings
+.claude/settings.local.json

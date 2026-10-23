@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Konkan Coastal Foods logo">
+  <rect width="128" height="128" rx="28" fill="#0F4C5C"/>
+  <path d="M16 84c14-12 28-12 42 0s28 12 42 0 18-8 12-4v20H16z" fill="#2F8F9D"/>
+  <path d="M16 96c14-10 28-10 42 0s28 10 42 0 18-6 12-3v19H16z" fill="#E8F4F6" opacity="0.9"/>
+  <circle cx="64" cy="46" r="20" fill="#F2A541"/>
+  <path d="M64 30c4 6 4 12 0 16s-4 10 0 16" fill="none" stroke="#0F4C5C" stroke-width="4" stroke-linecap="round"/>
+</svg>
