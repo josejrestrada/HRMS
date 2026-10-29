@@ -127,6 +127,13 @@ These are my own design choices, informed by the research above. The statutory n
 - **R31.** Nobody approves their own request. A request from someone with no manager goes to HR, and HR's own requests go to a designated second approver.
 - **R32.** Which holidays, weekly offs and approver apply to a day is decided by the employee's location and manager assignment effective on that day, not the current one.
 
+### Clarifications from building Leave (see docs/decisions.md)
+- **R33.** A leave request cannot span two calendar years. The employee applies separately for each year.
+- **R34.** When the balance falls short and the employee chooses to convert the shortfall to LOP (R18), the LOP days are stored on the request. LOP has no balance, so it writes no ledger entry.
+- **R35.** Monthly earned leave accrual is 1.5 days multiplied by (1 minus the LOP working days in the month divided by the working days in the month), rounded to the nearest half day. This is an assumption the owner still has to confirm.
+- **R36.** Restricted holidays are not subtracted from leave days until employees can select them. Only national and state holidays and weekly offs are skipped (R3).
+- **R37.** The 7-day backdating limit (R19) is counted in calendar days. A request older than that is refused with a message to contact HR, until HR can enter leave on someone's behalf.
+
 ### Still to resolve
 - Which Goa Act applies now (1973 or 2025) and its commencement date, and whether the plant in Verna is also covered by the Factories Act.
 - The official Goa 2026 holiday notification, to replace the tentative list in section 6.

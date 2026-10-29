@@ -7,21 +7,14 @@ import { getCurrentActor } from "@/shared/auth";
 import { DomainError } from "@/shared/errors";
 import { requireRole } from "@/shared/roles";
 import { changeAssignment, createEmployee, deactivateEmployee, reactivateEmployee } from "@/modules/employees/data";
-import { blankToUndefined, changeAssignmentSchema, deactivateSchema, newEmployeeSchema } from "@/modules/employees/schemas";
+import { changeAssignmentSchema, deactivateSchema, newEmployeeSchema } from "@/modules/employees/schemas";
+import { blankToUndefined, formValues } from "@/shared/validation";
 
 // Every action: sign-in and the hr_admin role are checked here on the server (and again inside each
 // data function). Form values are validated with Zod. Problems the user can fix are returned to the
 // form in plain words, with the values they typed; anything unexpected is thrown.
 
 export type FormState = { error?: string; field?: string; values?: Record<string, string> };
-
-function formValues(formData: FormData): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, value] of formData.entries()) {
-    if (typeof value === "string" && !key.startsWith("$ACTION")) out[key] = value;
-  }
-  return out;
-}
 
 function firstIssue(error: z.ZodError): { field: string; message: string } {
   const issue = error.issues[0];

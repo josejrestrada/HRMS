@@ -31,6 +31,29 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## Accepted
 
+## 2026-10-30 - Leave module, first slice (CL, SL, EL and LOP)
+- **Status:** Accepted (2026-10-30, owner: "proceed with Leave"). Works on the P4 ledger decision.
+- **In scope:**
+  - **Ledger (migration 004):** `leave_ledger` is append-only (update, delete and truncate blocked). Reasons in this slice: `grant`, `accrual`, `pending_hold`, `hold_release`, `application`, `cancellation`, `adjustment`. Balance is the sum of non-hold rows; **available** is balance minus open holds (P4). `expires_on` and `consumes_entry_id` exist for comp-off later.
+  - **Request fields:** `lop_days` (days of a request paid as leave without pay when the balance falls short, R18), `certificate_required` (sick leave over 2 days, R7), `decision_note`, `cancelled_at`. A trigger stops any edit of an approved request except cancelling it (R21).
+  - **Employee actions:** see balances, apply, cancel a pending request, cancel an approved future request, view a statement of every credit and debit.
+  - **Approvals (R20, R31):** a manager decides requests from their current direct reports; an HR admin can decide any request except their own; nobody decides their own; a requester with no manager goes to HR; an HR admin's own request is decided by another HR admin or their manager. Rejection needs a reason.
+  - **Credits:** an HR admin runs "Run leave credits" (idempotent). It grants CL and SL for the year (R13, never below the Goa statutory floor, P8) and accrues EL month by month (R8, R14). Every credit has a unique key, so running it twice adds nothing. A scheduled version (Vercel Cron) is a later step.
+- **Clarifications made while building (added to RESEARCH.md as R33 to R37):**
+  - **R33:** a request cannot span two calendar years; apply separately for each year.
+  - **R34:** the shortfall converted to LOP (R18) is stored on the request as `lop_days`; LOP has no balance, so it writes no ledger row.
+  - **R35:** monthly EL accrual is `1.5 x (1 - LOP working days in the month / working days in the month)`, rounded to the nearest half day. **Owner to confirm this formula.**
+  - **R36:** restricted holidays are not subtracted from leave days until restricted-holiday selection exists; only national and state holidays and weekly offs are skipped (R3).
+  - **R37:** "7 days" for backdating (R19) means calendar days, and a request older than that is refused with a message to contact HR, until HR can enter leave on someone's behalf.
+- **Deliberately not in this slice:**
+  - **Year-end processing (R22 to R25):** lapse, carry-forward and encashment. **Must ship before 31 Dec 2026.**
+  - **Maternity, paternity and comp-off** (R9 to R11), the 5-working-day escalation email (R20, needs Resend), holiday administration, attendance interplay, a scheduled cron job, opening-balance import (P6), and HR entering leave on someone's behalf.
+  - **Medical certificates:** only a flag and a notice, because file storage is undecided.
+- **Day counting:** weekly offs and holidays come from the location on the employee's assignment effective on the request's start date (R32, simplified: a request that spans a transfer uses the start-date location).
+- **Dev preview:** `/dev/leave?view=overview|apply|statement|approvals|admin` shows the screens with made-up numbers (no database, 404 in production).
+- **Escalation wording:** after 5 days the approvals page says HR can also decide the request; no email is sent yet.
+- **Testing:** pure rule functions in `src/modules/leave/rules.ts` (no database, shared with the browser form for the live day count) with unit tests; write functions have `...Tx` forms for rolled-back database tests.
+
 ## 2026-10-30 - People module, first slice (HR admin only)
 - **Status:** Accepted (2026-10-30, owner: "start with People")
 - **In scope:**

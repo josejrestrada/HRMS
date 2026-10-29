@@ -41,7 +41,7 @@ const nav = [
   },
   {
     label: "Leave",
-    soon: true,
+    href: "/app/leave",
     svg: (
       <svg {...icon}>
         <path d="M4 20c0-9 6-15 16-16 0 10-6 16-16 16Z" />

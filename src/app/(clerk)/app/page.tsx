@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentActor } from "@/shared/auth";
@@ -33,7 +34,9 @@ export default async function AppHomePage() {
   return (
     <div className="notice-card">
       <h1>Welcome, {actor.fullName}</h1>
-      <p>Your dashboard is coming soon. For now, please contact HR for anything you need.</p>
+      <p>
+        Your dashboard is coming soon. In the meantime you can <Link href="/app/leave">see your leave and apply</Link>.
+      </p>
     </div>
   );
 }

@@ -135,6 +135,13 @@ Tabs: **Overview** (employment details, employee code shown read-only with a loc
 ### 4.11 Admin: leave types and policy
 A form per leave type: quota, accrual mode, carry-forward cap, encashment, max consecutive days, eligibility, expiry. Changing a value requires an effective-from date and shows a preview of who is affected. Statutory minimums are shown next to the field and block values below them (R4).
 
+### 4.2a Leave pages (built in the first Leave slice)
+- **My leave** (`/app/leave`): a balance card for each of Casual, Sick and Earned showing available days, with the held days (waiting on approval) in smaller text and a link to the statement; an **Apply for leave** button; and **My requests** with a status chip and a Cancel button where allowed.
+- **Apply** (`/app/leave/apply`): the form from 4.2 with the live day count, the days skipped and why, the balance after, the rule line, the explicit "use the shortfall as leave without pay" choice, and a medical-certificate notice for sick leave over 2 days.
+- **Statement** (`/app/leave/statement/[type]`): every credit, hold, debit and cancellation with its reason and running balance.
+- **Approvals** (`/app/leave/approvals`, managers and HR): pending requests with employee, type, dates, days, how long they have waited, and Approve / Reject (reason required).
+- **Admin** (`/app/leave/admin`, HR): the Run leave credits button, with a plain summary of what was added.
+
 ### 4.12 Comp-off request
 A short form: the date worked on a weekly off or holiday, and a reason. It goes to the manager; on approval a credit appears in the CL/comp-off statement with its expiry date (R11). The statement shows days left before expiry, and the home screen warns when a credit expires within 14 days.
 

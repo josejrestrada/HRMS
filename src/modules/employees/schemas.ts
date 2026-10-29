@@ -1,27 +1,16 @@
 import { z } from "zod";
 import { addDays, todayIST } from "@/shared/dates";
+import { blankToUndefined, isoDate } from "@/shared/validation";
 
 export const EMPLOYMENT_TYPES = ["permanent", "probation", "contract", "intern"] as const;
 export type EmploymentType = (typeof EMPLOYMENT_TYPES)[number];
 
 export const PAGE_SIZE = 20;
 
-const isoDate = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a valid date")
-  .refine((v) => !Number.isNaN(new Date(`${v}T00:00:00Z`).getTime()) && new Date(`${v}T00:00:00Z`).toISOString().startsWith(v), "Enter a valid date");
-
 const text = (label: string, max = 80) =>
   z.string({ error: `Enter the ${label}` }).trim().min(1, `Enter the ${label}`).max(max, `The ${label} is too long`);
 
-/** Blank form fields arrive as empty strings; treat them as missing. */
-export function blankToUndefined(input: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(input)) {
-    out[key] = typeof value === "string" && value.trim() === "" ? undefined : value;
-  }
-  return out;
-}
+export { blankToUndefined };
 
 const assignmentFields = {
   locationId: z.uuid("Choose a location"),
