@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { NavLink } from "./_components/nav-link";
 import { UserButton } from "@clerk/nextjs";
 import { getCurrentActor } from "@/shared/auth";
 
@@ -29,7 +30,7 @@ const nav = [
   },
   {
     label: "People",
-    soon: true,
+    href: "/app/people",
     svg: (
       <svg {...icon}>
         <circle cx="9" cy="8" r="3.5" />
@@ -93,13 +94,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         {actor ? (
           <nav className="app-nav" aria-label="Main">
             <ul>
-              {nav.map((item) => (
+              {nav
+                .filter((item) => item.label !== "People" || actor.roles.includes("hr_admin"))
+                .map((item) => (
                 <li key={item.label}>
                   {item.href ? (
-                    <Link href={item.href} aria-current="page" className="nav-link nav-current">
+                    <NavLink href={item.href} exact={item.href === "/app"}>
                       {item.svg}
                       {item.label}
-                    </Link>
+                    </NavLink>
                   ) : (
                     <span className="nav-link nav-soon" aria-disabled="true">
                       {item.svg}

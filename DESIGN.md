@@ -119,6 +119,12 @@ Inbox of pending leave, regularization and WFH items. Each row shows who, what, 
 ### 4.9 Team calendar
 Month view with one row per team member and coloured bars for leave, WFH and holidays. Used by managers to check coverage before approving.
 
+### 4.9a People list (HR)
+Table of employees: avatar, name and code, department and designation, location, employment type, manager, and a status chip (Active / Inactive) with "Signed in" or "Not signed in". Search box (name, code, email), filters for status, location and department, and paging at 20 per page. **Add employee** button top right. Empty and no-result states say what to change. On a phone, rows become stacked cards.
+
+### 4.9b Add employee and change assignment (HR)
+One form per task, no wizard. **Add employee:** name, work email, gender, date of birth (optional), joining date, location, department, designation, employment type, manager. **Change assignment** (on the profile): effective date, location, department, designation, type, manager, with a note that history is kept. Errors appear next to the problem in plain words (for example "That manager would report to this employee"). Deactivate asks for an exit date and a confirmation.
+
 ### 4.10 Employee profile (HR)
 Tabs: **Overview** (employment details, employee code shown read-only with a lock icon and tooltip "Employee codes never change"), **Personal**, **Statutory and bank**, **Leave**, **Attendance**, **Documents**, **History**.
 - PAN, bank and salary appear masked. Aadhaar is never stored in full: the profile shows only the last 4 digits (`XXXX XXXX 1234`) and a verified flag. A **Reveal** button for the other fields asks for confirmation, shows the value for a short time, and writes an audit entry; the server enforces the role, rate-limits it, and refuses if the audit write fails.

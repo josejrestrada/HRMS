@@ -31,6 +31,28 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## Accepted
 
+## 2026-10-30 - People module, first slice (HR admin only)
+- **Status:** Accepted (2026-10-30, owner: "start with People")
+- **In scope:**
+  - **People list** at `/app/people`: search by name, code or email; filter by status, location and department; 20 per page.
+  - **Profile** at `/app/people/[id]`: Overview (current assignment, manager, direct reports, tenure) and History (every assignment with its effective dates, P5). Other tabs from DESIGN 4.10 (Personal, Statutory and bank, Leave, Attendance, Documents) show "Soon".
+  - **Add employee:** creates the employee and their first assignment in one transaction. The code comes from the sequence and can never be changed.
+  - **Change assignment** (transfer, promotion, new manager): closes the current assignment the day before the new one starts and opens a new one. Past and future effective dates are allowed; the new date must be after the current assignment's start.
+  - **Deactivate / reactivate:** sets status and exit date; employees are never deleted.
+- **Rules enforced on the server (and tested):**
+  - Only `hr_admin` can list, view or change people; every data function checks the role itself, and actions check it again.
+  - A manager must be an active employee, not the employee themself, and must not create a reporting loop (checked up the manager chain).
+  - Nobody can deactivate themself, the last active HR admin, or an employee who still has active direct reports (reassign them first).
+  - Work email is unique, case-insensitive; the error is shown in plain words.
+  - Every create, change and deactivate/reactivate writes an audit entry in the same transaction. Audit summaries never contain sensitive data.
+- **Deliberately not in this slice:**
+  - **Statutory and bank data (P7):** PAN, UAN, bank, salary and the last-4 Aadhaar, because the encryption key and `employee_private` table are not set up. The tab says "Soon".
+  - **Personal details:** address, phone, emergency contact and nominees have no tables yet.
+  - **Sign-in invites and roles screen:** the profile only shows whether the account is linked. Sending Clerk invitations and managing roles are separate features.
+  - **Manager and self views, and documents.**
+- **Dev preview:** `/dev/people?view=list|profile|history|change|deactivate|new` shows the screens with made-up people. It reads no database or session and returns 404 in production.
+- **Testing approach:** the write functions have a transaction-level form (`...Tx`) so database tests can run them inside a transaction that is always rolled back; nothing is left behind, since employees cannot be deleted.
+
 ## 2026-10-30 - Review fixes: development database, hardening, branch workflow
 - **Status:** Accepted (2026-10-30, owner chose "fix findings first")
 - **This Neon project is the DEVELOPMENT database.** It already holds 22 fake `TEST` employees and a test HR admin (codes `KCF0001` to `KCF0023`) that cannot be deleted because employee deletes are blocked by design. Production uses a **new, separate Neon project** created at go-live, where the real employees are imported with their own codes (P6, R29). Test rows never move to production.

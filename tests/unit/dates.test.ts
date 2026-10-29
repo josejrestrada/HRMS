@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, daysBetween, formatDate, todayIST, weekdayName } from "../../src/shared/dates";
+import { addDays, daysBetween, formatDate, tenureText, todayIST, weekdayName } from "../../src/shared/dates";
 
 describe("IST dates", () => {
   it("rolls over to the next day at 18:30 UTC (midnight IST)", () => {
@@ -24,5 +24,21 @@ describe("IST dates", () => {
   it("formats dates and weekdays", () => {
     expect(formatDate("2026-10-02")).toBe("2 Oct 2026");
     expect(weekdayName("2026-10-29")).toBe("Thursday");
+  });
+});
+
+describe("tenureText", () => {
+  it("describes years and months", () => {
+    expect(tenureText("2024-07-15", "2026-10-29")).toBe("2 years 3 months");
+    expect(tenureText("2025-10-29", "2026-10-29")).toBe("1 year");
+  });
+
+  it("does not count a month until the day of the month is reached", () => {
+    expect(tenureText("2026-09-30", "2026-10-29")).toBe("Less than a month");
+    expect(tenureText("2026-08-30", "2026-10-29")).toBe("1 month");
+  });
+
+  it("handles a joining date in the future", () => {
+    expect(tenureText("2026-12-01", "2026-10-29")).toBe("Not started yet");
   });
 });

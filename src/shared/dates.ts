@@ -41,3 +41,18 @@ const weekdayFormat = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekda
 export function weekdayName(isoDate: string): string {
   return weekdayFormat.format(new Date(`${isoDate}T00:00:00Z`));
 }
+
+/** "2 years 3 months" or "5 months" or "Less than a month", between two YYYY-MM-DD dates. */
+export function tenureText(from: string, to: string): string {
+  if (to < from) return "Not started yet";
+  const [fy, fm, fd] = from.split("-").map(Number);
+  const [ty, tm, td] = to.split("-").map(Number);
+  let months = (ty - fy) * 12 + (tm - fm) - (td < fd ? 1 : 0);
+  if (months < 1) return "Less than a month";
+  const years = Math.floor(months / 12);
+  months -= years * 12;
+  const parts: string[] = [];
+  if (years > 0) parts.push(`${years} ${years === 1 ? "year" : "years"}`);
+  if (months > 0) parts.push(`${months} ${months === 1 ? "month" : "months"}`);
+  return parts.join(" ");
+}

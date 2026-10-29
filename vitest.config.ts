@@ -3,5 +3,6 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
-  test: { include: ["tests/**/*.test.ts"] },
+  // Database tests share one database, so files run one after another.
+  test: { include: ["tests/**/*.test.ts"], fileParallelism: false },
 });

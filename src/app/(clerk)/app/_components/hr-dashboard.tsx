@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { HrDashboard } from "@/modules/reports/data";
 import { daysBetween, formatDate, weekdayName } from "@/shared/dates";
+import { Avatar, TYPE_LABELS, displayName, plural } from "./ui";
 
 const iconProps = {
   width: 20,
@@ -56,12 +57,6 @@ const ATTENDANCE: { key: string; label: string; color: string }[] = [
   { key: "absent", label: "Absent", color: "var(--series-5)" },
 ];
 
-const TYPE_LABELS: Record<string, string> = {
-  permanent: "Permanent",
-  probation: "Probation",
-  contract: "Contract",
-  intern: "Intern",
-};
 
 const LEAVE_NAMES: Record<string, string> = {
   CL: "Casual",
@@ -75,29 +70,9 @@ const LEAVE_NAMES: Record<string, string> = {
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-function plural(n: number, one: string, many: string) {
-  return `${n} ${n === 1 ? one : many}`;
-}
 
-/** Up to two initials. A leading "TEST" token (the marker on seeded test data) is ignored. */
-function initials(name: string) {
-  const words = name.split(/\s+/).filter((w) => w && w !== "TEST");
-  const first = words[0]?.[0] ?? "?";
-  const last = words.length > 1 ? words[words.length - 1][0] : "";
-  return (first + last).toUpperCase();
-}
 
-function Avatar({ name }: { name: string }) {
-  return (
-    <span className="avatar" aria-hidden="true">
-      {initials(name)}
-    </span>
-  );
-}
 
-function displayName(name: string) {
-  return name.replace(/^TEST\s+/, "");
-}
 
 function dateRange(start: string, end: string) {
   return start === end ? formatDate(start) : `${formatDate(start)} to ${formatDate(end)}`;
