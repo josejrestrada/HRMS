@@ -10,7 +10,10 @@
     "db:migrate": "node --env-file=.env.local scripts/migrate.mjs",
     "db:seed": "node --env-file=.env.local scripts/seed.mjs",
     "check:boundaries": "node scripts/check-boundaries.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prebuild": "node scripts/check-boundaries.mjs",
+    "pretest": "node scripts/check-boundaries.mjs",
+    "test:db": "RUN_DB_TESTS=yes node --env-file=.env.local ./node_modules/vitest/vitest.mjs run tests/integration"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.19",

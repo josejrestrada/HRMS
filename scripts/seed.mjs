@@ -1,10 +1,25 @@
 // Seeds clearly fake TEST data plus one HR admin, so the dashboard has something to show.
 // Refuses to run unless ALLOW_SEED=yes. Never deletes anything. Usage:
-//   ALLOW_SEED=yes npm run db:seed        (HR_ADMIN_EMAIL must be set in .env.local)
+//   ALLOW_SEED=yes SEED_TARGET_HOST=<host of DATABASE_URL> npm run db:seed
+// HR_ADMIN_EMAIL must be set in .env.local. Only ever run this against a development database.
 import { Pool } from "@neondatabase/serverless";
 
 if (process.env.ALLOW_SEED !== "yes") {
   console.error("Refusing to seed: set ALLOW_SEED=yes to confirm this is test data for a dev database.");
+  process.exit(1);
+}
+const dbHost = (() => {
+  try {
+    return new URL(process.env.DATABASE_URL || "").hostname;
+  } catch {
+    return "";
+  }
+})();
+if (!dbHost || process.env.SEED_TARGET_HOST !== dbHost) {
+  console.error(
+    `Refusing to seed: SEED_TARGET_HOST must equal the database host (${dbHost || "unknown"}). ` +
+      "Set it only for a development database you have chosen on purpose.",
+  );
   process.exit(1);
 }
 const adminEmail = (process.env.HR_ADMIN_EMAIL || "").trim().toLowerCase();
@@ -60,10 +75,14 @@ try {
   const loc = Object.fromEntries((await client.query("select code, id from location")).rows.map((r) => [r.code, r.id]));
   const lt = Object.fromEntries((await client.query("select code, id from leave_type")).rows.map((r) => [r.code, r.id]));
 
+  // Test rows use TST codes so they never use up (or collide with) real KCF codes.
+  let testCodeCounter = (await client.query("select count(*)::int as n from employee where employee_code like 'TST%'")).rows[0].n;
   async function addEmployee(name, email, joined, gender) {
+    testCodeCounter += 1;
+    const code = `TST${String(testCodeCounter).padStart(4, "0")}`;
     const r = await client.query(
-      "insert into employee (full_name, work_email, joining_date, gender) values ($1, $2, $3, $4) returning id",
-      [name, email, joined, gender],
+      "insert into employee (employee_code, full_name, work_email, joining_date, gender) values ($1, $2, $3, $4, $5) returning id",
+      [code, name, email, joined, gender],
     );
     return r.rows[0].id;
   }
@@ -80,6 +99,7 @@ try {
   const adminId = await addEmployee("TEST HR Administrator", adminEmail, adminJoined, null);
   await assign(adminId, "PNJ", "Human Resources", "HR Administrator", "permanent", adminJoined, null);
   await client.query("insert into employee_role (employee_id, role) values ($1, 'hr_admin')", [adminId]);
+  console.warn(`WARNING: granted hr_admin to the test employee with email ${adminEmail}. Development database only.`);
 
   const ids = [];
   for (let i = 0; i < people.length; i++) {

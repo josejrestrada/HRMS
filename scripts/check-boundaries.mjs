@@ -4,7 +4,13 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
 const root = path.join(process.cwd(), "src");
-const forbidden = [/from\s+["'](@\/shared\/db|\.{1,2}\/(?:\.\.\/)*shared\/db|\.\/db)["']/, /["']@neondatabase\/serverless["']/];
+const dbPath = String.raw`(?:@\/shared\/db|\.{1,2}\/(?:\.\.\/)*shared\/db|\.\/db)`;
+const forbidden = [
+  new RegExp(String.raw`from\s+["']${dbPath}["']`), // static import
+  new RegExp(String.raw`\bimport\s*\(\s*["']${dbPath}["']\s*\)`), // dynamic import()
+  new RegExp(String.raw`\brequire\s*\(\s*["']${dbPath}["']\s*\)`), // require()
+  /["']@neondatabase\/serverless["']/,
+];
 
 async function* walk(dir) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {

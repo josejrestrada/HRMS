@@ -31,6 +31,19 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## Accepted
 
+## 2026-10-30 - Review fixes: development database, hardening, branch workflow
+- **Status:** Accepted (2026-10-30, owner chose "fix findings first")
+- **This Neon project is the DEVELOPMENT database.** It already holds 22 fake `TEST` employees and a test HR admin (codes `KCF0001` to `KCF0023`) that cannot be deleted because employee deletes are blocked by design. Production uses a **new, separate Neon project** created at go-live, where the real employees are imported with their own codes (P6, R29). Test rows never move to production.
+- **Seed guard:** `db:seed` now also requires `SEED_TARGET_HOST` to equal the database host in `DATABASE_URL`, so it cannot run against a database the owner has not named on purpose. Test rows get `TST` codes, not `KCF` codes, and a loud warning is printed when `hr_admin` is granted.
+- **Migration 003:** adds TRUNCATE guards on `audit_log` and `employee`, a check that a leave quota is never below its statutory floor, and a minimum-privilege role `hrms_app` (no DELETE/TRUNCATE anywhere except `employee_role`, INSERT-only on `audit_log`). The login role used by the app is created by the owner in the Neon console and granted `hrms_app`; `DATABASE_URL` is then switched to it (P3 follow-through). Until then the app still connects as the owner and the triggers are the only barrier.
+- **Sign-in link (P2):** linking a Clerk user and writing its audit entry happen in one transaction. Only a unique-violation (SQLSTATE 23505) is treated as "already linked"; other database errors surface instead of showing "not linked".
+- **Bootstrap exception to P3:** `findActorByClerkUserId` and `linkActorByVerifiedEmail` are the only data functions without an actor argument, because they run before an actor exists. They return only the Actor.
+- **Dashboard accuracy:** pending count and oldest age now count active employees only; "on leave today" shows the true total and half days; active employees with no current assignment are counted and flagged instead of silently dropped.
+- **Tests and checks:** permission and linking unit tests with the database mocked; database protection tests that run only with `RUN_DB_TESTS=yes` and always roll back; `check:boundaries` runs before every build and test and also catches dynamic `import()` and `require`. No GitHub Actions workflow yet because the current GitHub token cannot push workflow files.
+- **Migration runner:** takes an advisory lock and records a checksum per applied file, failing if an applied file was edited.
+- **Branch workflow:** work happens on `develop`; `main` is production on Vercel and is updated only when the owner says so.
+- **Deferred (tracked):** approved leave not editable (R21), attendance lock enforcement, reporting-loop check, shifts (P1). Leave type shown to HR on the dashboard is accepted by default; the owner can ask to hide it.
+
 ## 2026-10-29 - HR dashboard redesign and dev-only design preview
 - **Status:** Accepted (2026-10-29, owner asked for a "proper HRMS dashboard")
 - **Decision:** the HR admin dashboard becomes a standard HR layout: greeting and date, four KPI cards (active employees, working today %, on leave today, pending approvals), a pending-leave table, an attendance stacked bar, headcount bars by location and department, who is out today, and a side column with needs-attention, upcoming holidays and new joiners. Quick actions (Add employee, Review leave, Run report) are shown disabled with a "Soon" label until those features exist.

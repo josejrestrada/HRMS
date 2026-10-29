@@ -144,12 +144,15 @@ function BarList({ rows }: { rows: { name: string; count: number }[] }) {
 }
 
 export function HrDashboardView({ data, userName }: { data: HrDashboard; userName: string }) {
-  const { headcount, onLeave, pending, attendance, holidays, recentJoiners, attention, byDepartment } = data;
+  const { headcount, onLeave, onLeaveTotal, pending, attendance, holidays, recentJoiners, attention, byDepartment } = data;
   const total = headcount.total;
   const working = (attendance.counts.present ?? 0) + (attendance.counts.wfh ?? 0) + (attendance.counts.half_day ?? 0);
   const presentPct = attendance.recorded > 0 && total > 0 ? Math.round((working / total) * 100) : null;
   const flagged =
-    (attention.withoutManager > 0 ? 1 : 0) + (attention.notSignedIn > 0 ? 1 : 0) + (pending.count > 0 ? 1 : 0);
+    (attention.withoutManager > 0 ? 1 : 0) +
+    (attention.notSignedIn > 0 ? 1 : 0) +
+    (attention.unassigned > 0 ? 1 : 0) +
+    (pending.count > 0 ? 1 : 0);
 
   return (
     <>
@@ -201,8 +204,8 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
           tone="violet"
           icon={icons.leave}
           label="On leave today"
-          value={onLeave.length}
-          sub={onLeave.length === 0 ? "Nobody is away" : "Approved leave"}
+          value={onLeaveTotal}
+          sub={onLeaveTotal === 0 ? "Nobody is away" : "Approved leave"}
         />
         <Kpi
           tone="amber"
@@ -341,9 +344,9 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
           <section className="panel" aria-labelledby="p-out">
             <div className="panel-head">
               <h2 id="p-out">Who is out today</h2>
-              <span className="chip">{onLeave.length}</span>
+              <span className="chip">{onLeaveTotal}</span>
             </div>
-            {onLeave.length === 0 ? (
+            {onLeaveTotal === 0 ? (
               <p className="empty">Nobody is on approved leave today.</p>
             ) : (
               <ul className="rows">
@@ -357,12 +360,12 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
                       </span>
                     </span>
                     <span className="row-meta">
-                      {LEAVE_NAMES[p.leaveCode] ?? p.leaveCode} leave
+                      {LEAVE_NAMES[p.leaveCode] ?? p.leaveCode} leave{p.dayPart === "first_half" ? " (first half)" : p.dayPart === "second_half" ? " (second half)" : ""}
                       <span className="sub">Until {formatDate(p.endDate)}</span>
                     </span>
                   </li>
                 ))}
-                {onLeave.length > 8 ? <li className="muted">and {onLeave.length - 8} more</li> : null}
+                {onLeaveTotal > 8 ? <li className="muted">and {onLeaveTotal - 8} more</li> : null}
               </ul>
             )}
           </section>
@@ -396,6 +399,16 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
                       <span className="sub">Approvals will go to HR</span>
                     </span>
                     <strong>{attention.withoutManager}</strong>
+                  </li>
+                ) : null}
+                {attention.unassigned > 0 ? (
+                  <li className="attn">
+                    <span className="attn-icon">{icons.alert}</span>
+                    <span>
+                      No current assignment
+                      <span className="sub">Missing from location and department counts</span>
+                    </span>
+                    <strong>{attention.unassigned}</strong>
                   </li>
                 ) : null}
                 {attention.notSignedIn > 0 ? (

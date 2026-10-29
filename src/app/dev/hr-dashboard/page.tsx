@@ -27,10 +27,11 @@ const data: HrDashboard = {
     { name: "Logistics", count: 3 },
     { name: "Human Resources", count: 1 },
   ],
+  onLeaveTotal: 3,
   onLeave: [
-    { employeeCode: "KCF0006", fullName: "Sanjay Gaonkar", leaveCode: "SL", startDate: "2026-10-28", endDate: "2026-10-30" },
-    { employeeCode: "KCF0010", fullName: "Rahul Volvoikar", leaveCode: "CL", startDate: "2026-10-29", endDate: "2026-10-29" },
-    { employeeCode: "KCF0015", fullName: "Deepa Kerkar", leaveCode: "EL", startDate: "2026-10-27", endDate: "2026-11-01" },
+    { employeeCode: "KCF0006", fullName: "Sanjay Gaonkar", leaveCode: "SL", dayPart: "full", startDate: "2026-10-28", endDate: "2026-10-30" },
+    { employeeCode: "KCF0010", fullName: "Rahul Volvoikar", leaveCode: "CL", dayPart: "first_half", startDate: "2026-10-29", endDate: "2026-10-29" },
+    { employeeCode: "KCF0015", fullName: "Deepa Kerkar", leaveCode: "EL", dayPart: "full", startDate: "2026-10-27", endDate: "2026-11-01" },
   ],
   pending: {
     count: 4,
@@ -53,7 +54,7 @@ const data: HrDashboard = {
     { employeeCode: "KCF0021", fullName: "Amit Bandekar", designation: "Sales Executive", location: "Panaji", joiningDate: "2026-10-15" },
     { employeeCode: "KCF0020", fullName: "Rutuja Salgaonkar", designation: "Machine Operator", location: "Verna", joiningDate: "2026-10-04" },
   ],
-  attention: { withoutManager: 5, notSignedIn: 22 },
+  attention: { withoutManager: 5, notSignedIn: 22, unassigned: 1 },
 };
 
 export default function PreviewPage() {
