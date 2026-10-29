@@ -2,12 +2,72 @@ import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import { getCurrentActor } from "@/shared/auth";
 
+const icon = {
+  width: 20,
+  height: 20,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.75,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+  "aria-hidden": true,
+};
+
 const nav = [
-  { label: "Dashboard", href: "/app" },
-  { label: "People", soon: true },
-  { label: "Leave", soon: true },
-  { label: "Attendance", soon: true },
-  { label: "Reports", soon: true },
+  {
+    label: "Dashboard",
+    href: "/app",
+    svg: (
+      <svg {...icon}>
+        <rect x="3.5" y="3.5" width="7" height="9" rx="1.5" />
+        <rect x="13.5" y="3.5" width="7" height="5" rx="1.5" />
+        <rect x="13.5" y="11.5" width="7" height="9" rx="1.5" />
+        <rect x="3.5" y="15.5" width="7" height="5" rx="1.5" />
+      </svg>
+    ),
+  },
+  {
+    label: "People",
+    soon: true,
+    svg: (
+      <svg {...icon}>
+        <circle cx="9" cy="8" r="3.5" />
+        <path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6" />
+        <path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.4c2 .7 3.5 2.6 3.5 5.6" />
+      </svg>
+    ),
+  },
+  {
+    label: "Leave",
+    soon: true,
+    svg: (
+      <svg {...icon}>
+        <path d="M4 20c0-9 6-15 16-16 0 10-6 16-16 16Z" />
+        <path d="M4 20c3-5 6.5-8.5 11-11" />
+      </svg>
+    ),
+  },
+  {
+    label: "Attendance",
+    soon: true,
+    svg: (
+      <svg {...icon}>
+        <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
+        <path d="M3.5 10h17M8 3v4M16 3v4" />
+        <path d="m9 15 2 2 4-4" />
+      </svg>
+    ),
+  },
+  {
+    label: "Reports",
+    soon: true,
+    svg: (
+      <svg {...icon}>
+        <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
+      </svg>
+    ),
+  },
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -37,10 +97,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 <li key={item.label}>
                   {item.href ? (
                     <Link href={item.href} aria-current="page" className="nav-link nav-current">
+                      {item.svg}
                       {item.label}
                     </Link>
                   ) : (
                     <span className="nav-link nav-soon" aria-disabled="true">
+                      {item.svg}
                       {item.label}
                       <span className="chip">Soon</span>
                     </span>

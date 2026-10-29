@@ -27,7 +27,7 @@ export default async function AppHomePage() {
 
   if (actor.roles.includes("hr_admin")) {
     const data = await getHrDashboard(actor);
-    return <HrDashboardView data={data} />;
+    return <HrDashboardView data={data} userName={actor.fullName} />;
   }
 
   return (

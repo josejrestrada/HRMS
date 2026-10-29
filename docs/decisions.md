@@ -31,6 +31,13 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## Accepted
 
+## 2026-10-29 - HR dashboard redesign and dev-only design preview
+- **Status:** Accepted (2026-10-29, owner asked for a "proper HRMS dashboard")
+- **Decision:** the HR admin dashboard becomes a standard HR layout: greeting and date, four KPI cards (active employees, working today %, on leave today, pending approvals), a pending-leave table, an attendance stacked bar, headcount bars by location and department, who is out today, and a side column with needs-attention, upcoming holidays and new joiners. Quick actions (Add employee, Review leave, Run report) are shown disabled with a "Soon" label until those features exist.
+- **Charts:** plain HTML/CSS bars using the reference palette from the data-viz skill (blue, orange, aqua, yellow, magenta in fixed order, light and dark values), with a text legend and counts so colour is never the only signal.
+- **Preview route:** `/dev/hr-dashboard` renders the dashboard with made-up numbers for design review. It reads no database or session and returns 404 in production (checked with a production build).
+- **Data:** the dashboard query now also returns the first five pending requests and headcount by department.
+
 ## 2026-10-29 - Database foundation first, then the HR admin dashboard
 - **Status:** Accepted (2026-10-29, owner chose "real foundation first" and "HR admin first")
 - **Scope of this slice:**

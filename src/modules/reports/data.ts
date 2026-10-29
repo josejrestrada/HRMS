@@ -11,7 +11,12 @@ export type HrDashboard = {
     byType: { type: string; count: number }[];
   };
   onLeave: { employeeCode: string; fullName: string; leaveCode: string; startDate: string; endDate: string }[];
-  pending: { count: number; oldestAgeDays: number | null };
+  pending: {
+    count: number;
+    oldestAgeDays: number | null;
+    items: { employeeCode: string; fullName: string; leaveCode: string; startDate: string; endDate: string; days: number; waitingDays: number }[];
+  };
+  byDepartment: { name: string; count: number }[];
   attendance: { counts: Record<string, number>; recorded: number; notRecorded: number };
   holidays: { date: string; name: string; type: string; verified: boolean; locations: string[] }[];
   recentJoiners: { employeeCode: string; fullName: string; designation: string; location: string; joiningDate: string }[];
@@ -33,7 +38,7 @@ export async function getHrDashboard(actor: Actor | null): Promise<HrDashboard> 
   requireRole(actor, "hr_admin");
   const today = todayIST();
 
-  const [byLocation, byType, onLeave, pending, attendance, active, holidays, joiners, attention] = await Promise.all([
+  const [byLocation, byType, onLeave, pending, attendance, active, holidays, joiners, attention, pendingItems, byDepartment] = await Promise.all([
     query<{ name: string; count: number }>(
       `select l.name, count(*)::int as count from ${ACTIVE_NOW} group by l.name order by l.name`,
       [today],
@@ -93,6 +98,23 @@ export async function getHrDashboard(actor: Actor | null): Promise<HrDashboard> 
          from ${ACTIVE_NOW}`,
       [today],
     ),
+    query<{ employee_code: string; full_name: string; leave_code: string; start_date: string; end_date: string; days: number; waiting: number }>(
+      `select e.employee_code, e.full_name, t.code as leave_code, lr.start_date::text, lr.end_date::text,
+              lr.days::float8 as days,
+              ($1::date - (lr.created_at at time zone 'Asia/Kolkata')::date)::int as waiting
+         from leave_request lr
+         join employee e on e.id = lr.employee_id
+         join leave_type t on t.id = lr.leave_type_id
+        where lr.status = 'pending' and e.status = 'active'
+        order by lr.created_at
+        limit 5`,
+      [today],
+    ),
+    query<{ name: string; count: number }>(
+      `select a.department as name, count(*)::int as count from ${ACTIVE_NOW}
+        group by a.department order by 2 desc, 1 limit 8`,
+      [today],
+    ),
   ]);
 
   const counts: Record<string, number> = {};
@@ -114,7 +136,20 @@ export async function getHrDashboard(actor: Actor | null): Promise<HrDashboard> 
       startDate: r.start_date,
       endDate: r.end_date,
     })),
-    pending: { count: pending[0]?.count ?? 0, oldestAgeDays: pending[0]?.oldest ?? null },
+    pending: {
+      count: pending[0]?.count ?? 0,
+      oldestAgeDays: pending[0]?.oldest ?? null,
+      items: pendingItems.map((r) => ({
+        employeeCode: r.employee_code,
+        fullName: r.full_name,
+        leaveCode: r.leave_code,
+        startDate: r.start_date,
+        endDate: r.end_date,
+        days: r.days,
+        waitingDays: r.waiting,
+      })),
+    },
+    byDepartment: byDepartment.map((r) => ({ name: r.name, count: r.count })),
     attendance: { counts, recorded, notRecorded: Math.max(total - recorded, 0) },
     holidays: holidays.map((r) => ({
       date: r.holiday_date,
