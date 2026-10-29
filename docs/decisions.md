@@ -31,6 +31,12 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## Accepted
 
+## 2026-10-29 - Public landing page (new screen)
+- **Status:** Accepted (2026-10-29, owner asked for it)
+- **Decision:** the home page becomes a public landing page: header with logo, name and a Sign in button; a hero with a one-line purpose; four module cards (Employee Master, Attendance, Leave, HR Assistant) each marked Planned until built; a note that access is by invitation from HR; footer. No employee data and no claims about unbuilt features.
+- **Sign in:** the button is shown but disabled ("coming soon") until Clerk sign-in is wired in the Foundation phase, so there is no dead link.
+- **Added to:** `DESIGN.md` section 4.0.
+
 ## 2026-10-23 - Database is Neon (Postgres), not Supabase
 - **Status:** Accepted (2026-10-23, owner)
 - **Decision:** use Neon for PostgreSQL. Supabase is dropped. The app connects only from server code with a Neon connection string (pooled) using a restricted application role, not the database owner.
