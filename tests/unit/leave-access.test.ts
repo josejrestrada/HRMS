@@ -33,6 +33,15 @@ describe("every leave function refuses a missing actor without touching the data
     ["runLeaveCredits", () => leave.runLeaveCredits(null)],
     ["previewYearEnd", () => leave.previewYearEnd(null, 2026)],
     ["runYearEnd", () => leave.runYearEnd(null, { year: 2026 })],
+    ["getLeaveEligibility", () => leave.getLeaveEligibility(null)],
+    ["applyMaternity", () => leave.applyMaternity(null, { startDate: "2026-12-01", expectedDeliveryDate: "2027-01-10", survivingChildren: 0 })],
+    ["applyPaternity", () => leave.applyPaternity(null, { birthDate: "2026-10-25", startDate: "2026-11-02", endDate: "2026-11-06" })],
+    ["getMyCompoff", () => leave.getMyCompoff(null)],
+    ["requestCompoff", () => leave.requestCompoff(null, { workedDate: "2026-10-24", part: "full" })],
+    ["cancelCompoff", () => leave.cancelCompoff(null, id)],
+    ["decideCompoff", () => leave.decideCompoff(null, { requestId: id, decision: "approve" })],
+    ["listCompoffApprovals", () => leave.listCompoffApprovals(null)],
+    ["runCompoffExpiry", () => leave.runCompoffExpiry(null)],
   ])("%s", async (_n, run) => {
     await expect(run()).rejects.toBeInstanceOf(ForbiddenError);
     expect(queryMock).not.toHaveBeenCalled();
@@ -48,6 +57,16 @@ describe("year-end is for HR admins only", () => {
     await expect(leave.runYearEndTx(tx, employee, { year: 2026 })).rejects.toBeInstanceOf(ForbiddenError);
     expect(tx.query).not.toHaveBeenCalled();
     expect(queryMock).not.toHaveBeenCalled();
+    expect(transactionMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("expiring comp-off is for HR admins only", () => {
+  it("rejects an ordinary employee before any query", async () => {
+    await expect(leave.runCompoffExpiry(employee)).rejects.toBeInstanceOf(ForbiddenError);
+    const tx = { query: vi.fn() };
+    await expect(leave.runCompoffExpiryTx(tx, employee)).rejects.toBeInstanceOf(ForbiddenError);
+    expect(tx.query).not.toHaveBeenCalled();
     expect(transactionMock).not.toHaveBeenCalled();
   });
 });
@@ -68,6 +87,11 @@ describe("transaction-level functions also check the actor", () => {
     ["applyLeaveTx", () => leave.applyLeaveTx(tx, null, apply)],
     ["decideLeaveTx", () => leave.decideLeaveTx(tx, null, { requestId: id, decision: "approve" })],
     ["cancelLeaveTx", () => leave.cancelLeaveTx(tx, null, id)],
+    ["applyMaternityTx", () => leave.applyMaternityTx(tx, null, { startDate: "2026-12-01", expectedDeliveryDate: "2027-01-10", survivingChildren: 0 })],
+    ["applyPaternityTx", () => leave.applyPaternityTx(tx, null, { birthDate: "2026-10-25", startDate: "2026-11-02", endDate: "2026-11-06" })],
+    ["requestCompoffTx", () => leave.requestCompoffTx(tx, null, { workedDate: "2026-10-24", part: "full" })],
+    ["cancelCompoffTx", () => leave.cancelCompoffTx(tx, null, id)],
+    ["decideCompoffTx", () => leave.decideCompoffTx(tx, null, { requestId: id, decision: "approve" })],
   ])("%s", async (_n, run) => {
     await expect(run()).rejects.toBeInstanceOf(ForbiddenError);
     expect(tx.query).not.toHaveBeenCalled();

@@ -1,11 +1,14 @@
 import { notFound } from "next/navigation";
-import type { ApplyContext, ApprovalRow, LeaveOverview, Statement } from "@/modules/leave/data";
+import type { ApplyContext, ApprovalRow, CompoffApprovalRow, CompoffCreditRow, CompoffRequestRow, LeaveOverview, Statement } from "@/modules/leave/data";
 import { applyLeaveAction } from "../../(clerk)/app/leave/actions";
 import { AdminView } from "../../(clerk)/app/leave/_components/admin-view";
 import { ApplyForm } from "../../(clerk)/app/leave/_components/apply-form";
 import { ApprovalsView } from "../../(clerk)/app/leave/_components/approvals-view";
 import { OverviewView } from "../../(clerk)/app/leave/_components/overview-view";
+import { CompoffView } from "../../(clerk)/app/leave/_components/compoff-view";
+import { MaternityForm, PaternityForm } from "../../(clerk)/app/leave/_components/family-forms";
 import { StatementView } from "../../(clerk)/app/leave/_components/statement-view";
+import { applyMaternityAction, applyPaternityAction } from "../../(clerk)/app/leave/actions";
 
 // Development-only design preview with made-up numbers. It reads no database and no session, and it
 // returns 404 in production. Use ?view=overview | apply | statement | approvals | admin
@@ -57,6 +60,18 @@ const approvals: ApprovalRow[] = [
   { id: "a2", employeeId: "e2", employeeCode: "KCF0011", employeeName: "Sneha Pednekar", typeCode: "EL", typeName: "Earned leave", startDate: "2026-11-09", endDate: "2026-11-13", dayPart: "full", days: 5, lopDays: 2, reason: null, certificateRequired: false, waitingDays: 6 },
 ];
 
+const compoffApprovals: CompoffApprovalRow[] = [
+  { id: "c1", employeeId: "e3", employeeCode: "KCF0006", employeeName: "Sanjay Gaonkar", workedDate: "2026-10-24", days: 1, reason: "Month-end dispatch on Saturday", waitingDays: 2 },
+];
+const compoffCredits: CompoffCreditRow[] = [
+  { id: "k2", earnedOn: "2026-10-26", days: 1, remaining: 1, expiresOn: "2026-12-25", expired: false },
+  { id: "k1", earnedOn: "2026-08-03", days: 0.5, remaining: 0, expiresOn: "2026-10-02", expired: true },
+];
+const compoffRequests: CompoffRequestRow[] = [
+  { id: "q2", workedDate: "2026-10-24", days: 1, status: "pending", reason: null, decisionNote: null, canCancel: true },
+  { id: "q1", workedDate: "2026-10-17", days: 1, status: "approved", reason: null, decisionNote: null, canCancel: false },
+];
+
 export default async function LeavePreview({ searchParams }: { searchParams: Promise<{ view?: string }> }) {
   if (process.env.NODE_ENV === "production") notFound();
   const { view = "overview" } = await searchParams;
@@ -69,10 +84,22 @@ export default async function LeavePreview({ searchParams }: { searchParams: Pro
               <h1 className="panel-title">Apply for leave</h1>
               <ApplyForm context={context} action={applyLeaveAction} />
             </section>
+          ) : view === "maternity" ? (
+            <section className="panel panel-form">
+              <h1 className="panel-title">Maternity leave</h1>
+              <MaternityForm action={applyMaternityAction} today="2026-10-30" />
+            </section>
+          ) : view === "paternity" ? (
+            <section className="panel panel-form">
+              <h1 className="panel-title">Paternity leave</h1>
+              <PaternityForm action={applyPaternityAction} weeklyOffDays={[0, 6]} holidays={context.holidays} />
+            </section>
+          ) : view === "compoff" ? (
+            <CompoffView credits={compoffCredits} requests={compoffRequests} saved="requested" />
           ) : view === "statement" ? (
             <StatementView statement={statement} />
           ) : view === "approvals" ? (
-            <ApprovalsView rows={approvals} pending={2} isHr saved="approved" />
+            <ApprovalsView rows={approvals} compoff={compoffApprovals} pending={3} isHr saved="approved" />
           ) : view === "admin" ? (
             <AdminView
               year={2026}
@@ -93,7 +120,7 @@ export default async function LeavePreview({ searchParams }: { searchParams: Pro
               }}
             />
           ) : (
-            <OverviewView overview={overview} canApprove pending={2} isHr saved="applied" />
+            <OverviewView overview={overview} canApprove pending={2} isHr eligibility={{ maternity: true, paternity: false }} saved="applied" />
           )}
         </main>
       </div>

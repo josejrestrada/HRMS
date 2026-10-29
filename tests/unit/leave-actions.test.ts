@@ -14,15 +14,39 @@ const cancelMock = vi.fn();
 const decideMock = vi.fn();
 const creditsMock = vi.fn();
 const yearEndMock = vi.fn();
+const maternityMock = vi.fn();
+const paternityMock = vi.fn();
+const compoffRequestMock = vi.fn();
+const compoffCancelMock = vi.fn();
+const compoffDecideMock = vi.fn();
+const compoffExpiryMock = vi.fn();
 vi.mock("@/modules/leave/data", () => ({
   applyLeave: (...a: unknown[]) => applyMock(...a),
   cancelLeave: (...a: unknown[]) => cancelMock(...a),
   decideLeave: (...a: unknown[]) => decideMock(...a),
   runLeaveCredits: (...a: unknown[]) => creditsMock(...a),
   runYearEnd: (...a: unknown[]) => yearEndMock(...a),
+  applyMaternity: (...a: unknown[]) => maternityMock(...a),
+  applyPaternity: (...a: unknown[]) => paternityMock(...a),
+  requestCompoff: (...a: unknown[]) => compoffRequestMock(...a),
+  cancelCompoff: (...a: unknown[]) => compoffCancelMock(...a),
+  decideCompoff: (...a: unknown[]) => compoffDecideMock(...a),
+  runCompoffExpiry: (...a: unknown[]) => compoffExpiryMock(...a),
 }));
 
-import { applyLeaveAction, cancelLeaveAction, decideLeaveAction, runLeaveCreditsAction, runYearEndAction } from "@/app/(clerk)/app/leave/actions";
+import {
+  applyLeaveAction,
+  applyMaternityAction,
+  applyPaternityAction,
+  cancelCompoffAction,
+  cancelLeaveAction,
+  decideCompoffAction,
+  decideLeaveAction,
+  requestCompoffAction,
+  runCompoffExpiryAction,
+  runLeaveCreditsAction,
+  runYearEndAction,
+} from "@/app/(clerk)/app/leave/actions";
 import { DomainError } from "@/shared/errors";
 import { ForbiddenError, type Actor } from "@/shared/roles";
 
@@ -38,7 +62,7 @@ function form(values: Record<string, string>) {
 const goodApply = { leaveTypeId: id, startDate: "2026-11-02", endDate: "2026-11-03", dayPart: "full", reason: "" };
 
 beforeEach(() => {
-  [actorMock, applyMock, cancelMock, decideMock, creditsMock, yearEndMock].forEach((m) => m.mockReset());
+  [actorMock, applyMock, cancelMock, decideMock, creditsMock, yearEndMock, maternityMock, paternityMock, compoffRequestMock, compoffCancelMock, compoffDecideMock, compoffExpiryMock].forEach((m) => m.mockReset());
 });
 
 describe("leave actions need a signed-in, linked employee", () => {
@@ -129,5 +153,80 @@ describe("runYearEndAction", () => {
     actorMock.mockResolvedValue(hr);
     await expect(runYearEndAction(form({ year: "soon" }))).rejects.toThrow(/error=Choose\+a\+year/);
     expect(yearEndMock).not.toHaveBeenCalled();
+  });
+});
+
+const goodMaternity = { startDate: "2026-12-01", expectedDeliveryDate: "2027-01-10", survivingChildren: "0", reason: "" };
+const goodPaternity = { birthDate: "2026-10-25", startDate: "2026-11-02", endDate: "2026-11-06" };
+const goodCompoff = { workedDate: "2026-10-24", part: "full", reason: "" };
+
+describe("family leave and comp-off actions need a signed-in, linked employee", () => {
+  it.each([
+    ["maternity", () => applyMaternityAction({}, form(goodMaternity))],
+    ["paternity", () => applyPaternityAction({}, form(goodPaternity))],
+    ["request comp-off", () => requestCompoffAction({}, form(goodCompoff))],
+    ["cancel comp-off", () => cancelCompoffAction(form({ requestId: id }))],
+    ["decide comp-off", () => decideCompoffAction(form({ requestId: id, decision: "approve" }))],
+    ["expire comp-off", () => runCompoffExpiryAction()],
+  ])("%s", async (_n, run) => {
+    actorMock.mockResolvedValue(null);
+    await expect(run()).rejects.toBeInstanceOf(ForbiddenError);
+    for (const m of [maternityMock, paternityMock, compoffRequestMock, compoffCancelMock, compoffDecideMock, compoffExpiryMock]) {
+      expect(m).not.toHaveBeenCalled();
+    }
+  });
+
+  it("expiring comp-off is refused for an ordinary employee", async () => {
+    actorMock.mockResolvedValue(employee);
+    await expect(runCompoffExpiryAction()).rejects.toBeInstanceOf(ForbiddenError);
+    expect(compoffExpiryMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("applyMaternityAction", () => {
+  it("asks for the number of children in plain words and keeps what was typed", async () => {
+    actorMock.mockResolvedValue(employee);
+    const state = await applyMaternityAction({}, form({ ...goodMaternity, survivingChildren: "" }));
+    expect(state.field).toBe("survivingChildren");
+    expect(state.error).toContain("surviving children");
+    expect(state.values?.startDate).toBe("2026-12-01");
+    expect(maternityMock).not.toHaveBeenCalled();
+  });
+
+  it("returns a domain error to the form, and redirects on success", async () => {
+    actorMock.mockResolvedValue(employee);
+    maternityMock.mockRejectedValueOnce(new DomainError("Maternity leave must start on or before the expected delivery date.", "startDate"));
+    expect((await applyMaternityAction({}, form(goodMaternity))).field).toBe("startDate");
+    maternityMock.mockResolvedValueOnce({ requestId: id, endDate: "2027-05-31" });
+    await expect(applyMaternityAction({}, form(goodMaternity))).rejects.toThrow("REDIRECT:/app/leave?saved=applied");
+    expect(maternityMock.mock.calls[1][1].survivingChildren).toBe(0);
+  });
+});
+
+describe("applyPaternityAction and comp-off actions", () => {
+  it("validates dates before calling the data layer", async () => {
+    actorMock.mockResolvedValue(employee);
+    const state = await applyPaternityAction({}, form({ ...goodPaternity, birthDate: "2026-13-40" }));
+    expect(state.field).toBe("birthDate");
+    expect(paternityMock).not.toHaveBeenCalled();
+  });
+
+  it("requires full or half for comp-off and redirects on success", async () => {
+    actorMock.mockResolvedValue(employee);
+    expect((await requestCompoffAction({}, form({ ...goodCompoff, part: "" }))).field).toBe("part");
+    compoffRequestMock.mockResolvedValue({ requestId: id });
+    await expect(requestCompoffAction({}, form(goodCompoff))).rejects.toThrow("REDIRECT:/app/leave/comp-off?saved=requested");
+  });
+
+  it("shows a refusal when deciding comp-off as a message", async () => {
+    actorMock.mockResolvedValue(hr);
+    compoffDecideMock.mockRejectedValue(new ForbiddenError("You cannot decide this request."));
+    await expect(decideCompoffAction(form({ requestId: id, decision: "approve" }))).rejects.toThrow(/REDIRECT:\/app\/leave\/approvals\?error=You\+cannot\+decide/);
+  });
+
+  it("expires comp-off and redirects with the totals", async () => {
+    actorMock.mockResolvedValue(hr);
+    compoffExpiryMock.mockResolvedValue({ credits: 2, days: 1.5 });
+    await expect(runCompoffExpiryAction()).rejects.toThrow(/saved=compoff&credits=2&days=1.5/);
   });
 });

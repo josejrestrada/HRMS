@@ -3,13 +3,20 @@ import { query, transaction, type Queryable } from "@/shared/db";
 import { recordAudit } from "@/shared/audit";
 import { DomainError } from "@/shared/errors";
 import { ForbiddenError, requireRole, type Actor } from "@/shared/roles";
-import { addDays, formatDate, todayIST } from "@/shared/dates";
-import type { ApplyLeaveInput, DecisionInput } from "./schemas";
+import { addDays, addMonths, formatDate, todayIST } from "@/shared/dates";
+import { getSelfFacts } from "@/modules/employees/data";
+import type { ApplyLeaveInput, CompoffInput, DecisionInput, MaternityInput, PaternityInput } from "./schemas";
 import {
+  COMPOFF_EXPIRY_DAYS,
   accrualMonths,
+  allocateCompoff,
   canCancel,
   canDecide,
   checkApplication,
+  checkCompoff,
+  checkMaternity,
+  checkPaternity,
+  compoffAvailable,
   countLeaveDays,
   elAccrualForMonth,
   fmtDays,
@@ -17,6 +24,7 @@ import {
   proratedGrant,
   workingDaysInMonth,
   yearEndPlan,
+  type CompoffCredit,
   type DayPart,
 } from "./rules";
 
@@ -25,6 +33,42 @@ import {
 
 const HOLDS = `'pending_hold', 'hold_release'`;
 const BALANCE_TYPES = ["CL", "SL", "EL"];
+const STATEMENT_TYPES = ["CL", "SL", "EL", "COMPOFF"];
+
+/** Every comp-off credit with its remaining days (credit minus what was used or expired). */
+async function compoffCredits(q: Queryable, employeeId: string): Promise<CompoffCredit[]> {
+  const rows = await q.query<{ id: string; expires_on: string; remaining: number }>(
+    `select c.id::text as id, c.expires_on::text as expires_on,
+            (c.delta + coalesce(sum(r.delta), 0))::float8 as remaining
+       from leave_ledger c
+       left join leave_ledger r on r.consumes_entry_id = c.id
+      where c.employee_id = $1 and c.reason = 'compoff_credit'
+      group by c.id
+      order by c.expires_on, c.id`,
+    [employeeId],
+  );
+  return rows.map((r) => ({ id: r.id, remaining: r.remaining, expiresOn: r.expires_on }));
+}
+
+async function openHolds(q: Queryable, employeeId: string, typeId: string): Promise<number> {
+  const rows = await q.query<{ h: number }>(
+    `select coalesce(-sum(delta), 0)::float8 as h from leave_ledger
+      where employee_id = $1 and leave_type_id = $2 and reason in (${HOLDS})`,
+    [employeeId, typeId],
+  );
+  return rows[0].h;
+}
+
+/** Comp-off as a balance card: days still usable today, not counting expired credits. */
+async function compoffBalance(q: Queryable, employeeId: string, today: string): Promise<Balance | null> {
+  const credits = await compoffCredits(q, employeeId);
+  if (credits.length === 0) return null;
+  const type = (await q.query<{ id: string; name: string }>("select id, name from leave_type where code = 'COMPOFF' and active"))[0];
+  if (!type) return null;
+  const usable = compoffAvailable(credits, today);
+  const held = await openHolds(q, employeeId, type.id);
+  return { typeId: type.id, code: "COMPOFF", name: type.name, annualQuota: null, balance: usable, held, available: Math.max(0, usable - held) };
+}
 
 export type Balance = {
   typeId: string;
@@ -159,6 +203,8 @@ export async function getLeaveOverview(actor: Actor | null): Promise<LeaveOvervi
       [actor.employeeId],
     ),
   ]);
+  const compoff = await compoffBalance({ query }, actor.employeeId, today);
+  if (compoff) balances.push(compoff);
   return {
     today,
     balances,
@@ -213,7 +259,13 @@ export async function getApplyContext(actor: Actor | null): Promise<ApplyContext
       [BALANCE_TYPES],
     ),
   ]);
+  const compoff = await compoffBalance({ query }, actor.employeeId, today);
   const available = Object.fromEntries(balances.map((b) => [b.code, b.available]));
+  if (compoff) {
+    available.COMPOFF = compoff.available;
+    const ct = await query<{ id: string; name: string }>("select id, name from leave_type where code = 'COMPOFF' and active");
+    if (ct[0]) types.push({ id: ct[0].id, code: "COMPOFF", name: ct[0].name, max: null });
+  }
   return {
     today,
     locationName: loc.name,
@@ -231,8 +283,9 @@ export async function getApplyContext(actor: Actor | null): Promise<ApplyContext
 
 export async function getStatement(actor: Actor | null, typeCode: string): Promise<Statement | null> {
   requireEmployee(actor);
+  if (!STATEMENT_TYPES.includes(typeCode)) return null;
   const [bal] = await balancesFor({ query }, actor.employeeId, [typeCode]);
-  if (!bal || !BALANCE_TYPES.includes(typeCode)) return null;
+  if (!bal) return null;
   const rows = await query<{ id: string; entry_date: string; reason: string; delta: number; note: string | null }>(
     `select id::text, entry_date::text, reason, delta::float8 as delta, note
        from leave_ledger where employee_id = $1 and leave_type_id = $2 order by id asc limit 500`,
@@ -265,7 +318,10 @@ export async function applyLeaveTx(tx: Queryable, actor: Actor | null, input: Ap
     )
   )[0];
   if (!type) throw new DomainError("Choose a valid leave type.", "leaveTypeId");
-  if (!(type.accrual_mode === "upfront" || type.accrual_mode === "monthly" || type.code === "LOP")) {
+  if (type.code === "MAT" || type.code === "PAT") {
+    throw new DomainError("Use the maternity or paternity leave page for this kind of leave.", "leaveTypeId");
+  }
+  if (!(type.accrual_mode === "upfront" || type.accrual_mode === "monthly" || type.code === "LOP" || type.code === "COMPOFF")) {
     throw new DomainError("That kind of leave cannot be requested here yet. Please contact HR.", "leaveTypeId");
   }
 
@@ -305,6 +361,12 @@ export async function applyLeaveTx(tx: Queryable, actor: Actor | null, input: Ap
   }
 
   const [bal] = await balancesFor(tx, actor.employeeId, [type.code]);
+  let available = bal?.available ?? 0;
+  if (type.code === "COMPOFF") {
+    // Only credits that have not expired by the last leave date can be used (R51).
+    const credits = await compoffCredits(tx, actor.employeeId);
+    available = Math.max(0, compoffAvailable(credits, input.endDate) - (await openHolds(tx, actor.employeeId, type.id)));
+  }
   const check = checkApplication({
     today,
     start: input.startDate,
@@ -314,7 +376,7 @@ export async function applyLeaveTx(tx: Queryable, actor: Actor | null, input: Ap
     typeCode: type.code,
     typeName: type.name,
     maxConsecutiveDays: type.max,
-    available: bal?.available ?? 0,
+    available,
     convertShortfallToLop: input.convertShortfallToLop,
   });
   if (!check.ok) throw new DomainError(check.error, check.field);
@@ -359,6 +421,8 @@ type LockedRequest = {
   id: string;
   employee_id: string;
   leave_type_id: string;
+  type_code: string;
+  held: number;
   start_date: string;
   end_date: string;
   days: number;
@@ -368,9 +432,11 @@ type LockedRequest = {
 
 async function lockRequest(tx: Queryable, requestId: string): Promise<LockedRequest> {
   const rows = await tx.query<LockedRequest>(
-    `select id, employee_id, leave_type_id, start_date::text, end_date::text, days::float8 as days,
-            lop_days::float8 as lop_days, status
-       from leave_request where id = $1 for update`,
+    `select lr.id, lr.employee_id, lr.leave_type_id, t.code as type_code,
+            (case when t.code in ('MAT', 'PAT') then 0 else lr.days - lr.lop_days end)::float8 as held,
+            lr.start_date::text, lr.end_date::text, lr.days::float8 as days, lr.lop_days::float8 as lop_days, lr.status
+       from leave_request lr join leave_type t on t.id = lr.leave_type_id
+      where lr.id = $1 for update of lr`,
     [requestId],
   );
   if (rows.length === 0) throw new DomainError("That leave request was not found.");
@@ -398,7 +464,7 @@ export async function decideLeaveTx(tx: Queryable, actor: Actor | null, input: D
   });
   if (!allowed) throw new ForbiddenError("You cannot decide this request.");
 
-  const held = req.days - req.lop_days;
+  const held = req.held;
   const year = Number(req.start_date.slice(0, 4));
   const today = todayIST();
   const entry = (delta: number, reason: string) =>
@@ -410,7 +476,24 @@ export async function decideLeaveTx(tx: Queryable, actor: Actor | null, input: D
 
   if (held > 0) {
     await entry(held, "hold_release");
-    if (input.decision === "approve") await entry(-held, "application");
+    if (input.decision === "approve") {
+      if (req.type_code === "COMPOFF") {
+        // Use the earliest-expiring credits first, and record which credit each debit used (R51).
+        const allocation = allocateCompoff(await compoffCredits(tx, req.employee_id), held, req.end_date);
+        if (!allocation) {
+          throw new DomainError("The employee's comp-off days do not cover these dates (some expire earlier). Ask them to pick earlier dates.");
+        }
+        for (const a of allocation) {
+          await tx.query(
+            `insert into leave_ledger (employee_id, leave_type_id, leave_year, entry_date, delta, reason, request_id, consumes_entry_id)
+             values ($1, $2, $3, $4, $5, 'application', $6, $7)`,
+            [req.employee_id, req.leave_type_id, year, today, -a.amount, req.id, Number(a.creditId)],
+          );
+        }
+      } else {
+        await entry(-held, "application");
+      }
+    }
   }
   await tx.query(
     `update leave_request set status = $2, approver_id = $3, decided_at = now(), decision_note = $4 where id = $1`,
@@ -445,12 +528,36 @@ export async function cancelLeaveTx(tx: Queryable, actor: Actor | null, requestI
     throw new DomainError("Leave that has already started can only be cancelled by HR.");
   }
 
-  const held = req.days - req.lop_days;
-  if (held > 0) {
+  const held = req.held;
+  const year = Number(req.start_date.slice(0, 4));
+  if (held > 0 && req.status === "pending") {
     await tx.query(
       `insert into leave_ledger (employee_id, leave_type_id, leave_year, entry_date, delta, reason, request_id)
-       values ($1, $2, $3, $4, $5, $6, $7)`,
-      [req.employee_id, req.leave_type_id, Number(req.start_date.slice(0, 4)), today, held, req.status === "pending" ? "hold_release" : "cancellation", req.id],
+       values ($1, $2, $3, $4, $5, 'hold_release', $6)`,
+      [req.employee_id, req.leave_type_id, year, today, held, req.id],
+    );
+  } else if (held > 0 && req.type_code === "COMPOFF") {
+    // Give the days back only to comp-off credits that have not expired (R53).
+    const used = await tx.query<{ cid: string; amount: number; expires_on: string }>(
+      `select l.consumes_entry_id::text as cid, (-sum(l.delta))::float8 as amount, c.expires_on::text as expires_on
+         from leave_ledger l join leave_ledger c on c.id = l.consumes_entry_id
+        where l.request_id = $1 and l.reason = 'application' and l.consumes_entry_id is not null
+        group by l.consumes_entry_id, c.expires_on`,
+      [req.id],
+    );
+    for (const u of used) {
+      if (u.expires_on < today) continue;
+      await tx.query(
+        `insert into leave_ledger (employee_id, leave_type_id, leave_year, entry_date, delta, reason, request_id, consumes_entry_id)
+         values ($1, $2, $3, $4, $5, 'cancellation', $6, $7)`,
+        [req.employee_id, req.leave_type_id, year, today, u.amount, req.id, Number(u.cid)],
+      );
+    }
+  } else if (held > 0) {
+    await tx.query(
+      `insert into leave_ledger (employee_id, leave_type_id, leave_year, entry_date, delta, reason, request_id)
+       values ($1, $2, $3, $4, $5, 'cancellation', $6)`,
+      [req.employee_id, req.leave_type_id, year, today, held, req.id],
     );
   }
   await tx.query("update leave_request set status = 'cancelled', cancelled_at = now() where id = $1", [req.id]);
@@ -537,8 +644,8 @@ export async function getApprovalScope(actor: Actor | null): Promise<{ canApprov
   );
   const canApprove = isHr(actor) || reports[0].n > 0;
   if (!canApprove) return { canApprove, pending: 0 };
-  const pending = await listApprovals(actor);
-  return { canApprove, pending: pending.length };
+  const [pending, compoff] = await Promise.all([listApprovals(actor), listCompoffApprovals(actor)]);
+  return { canApprove, pending: pending.length + compoff.length };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -854,4 +961,408 @@ export async function getCalendarFacts(
     leave: leave.map((r) => ({ employeeId: r.employee_id, start: r.start_date, end: r.end_date, part: r.day_part })),
     holidays: holidays.map((r) => ({ locationId: r.location_id, date: r.d, name: r.name })),
   };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Maternity, paternity and comp-off (R47 to R53)
+// ---------------------------------------------------------------------------------------------
+
+async function calendarAt(
+  tx: Queryable,
+  employeeId: string,
+  start: string,
+  end: string,
+): Promise<{ weeklyOffDays: number[]; holidays: Record<string, string> } | null> {
+  const loc = (
+    await tx.query<{ id: string; weekly_off_days: number[] }>(
+      `select l.id, l.weekly_off_days
+         from employment_assignment a join location l on l.id = a.location_id
+        where a.employee_id = $1 and a.effective_from <= $2::date and (a.effective_to is null or a.effective_to >= $2::date)`,
+      [employeeId, start],
+    )
+  )[0];
+  if (!loc) return null;
+  const holidays = await tx.query<{ d: string; name: string }>(
+    `select holiday_date::text as d, name from holiday
+      where location_id = $1 and type in ('national', 'state') and holiday_date between $2::date and $3::date`,
+    [loc.id, start, end],
+  );
+  return { weeklyOffDays: loc.weekly_off_days, holidays: Object.fromEntries(holidays.map((h) => [h.d, h.name])) };
+}
+
+async function assertNoOverlap(tx: Queryable, employeeId: string, start: string, end: string) {
+  const overlap = await tx.query<{ s: string; e: string }>(
+    `select start_date::text as s, end_date::text as e from leave_request
+      where employee_id = $1 and status in ('pending', 'approved')
+        and daterange(start_date, end_date, '[]') && daterange($2::date, $3::date, '[]') limit 1`,
+    [employeeId, start, end],
+  );
+  if (overlap.length > 0) {
+    throw new DomainError(`You already have leave from ${formatDate(overlap[0].s)} to ${formatDate(overlap[0].e)} that overlaps these dates.`, "startDate");
+  }
+}
+
+async function lockActiveEmployee(tx: Queryable, employeeId: string) {
+  const emp = (
+    await tx.query<{ status: string; gender: string | null; joining_date: string }>(
+      "select status, gender, joining_date::text from employee where id = $1 for update",
+      [employeeId],
+    )
+  )[0];
+  if (!emp || emp.status !== "active") throw new DomainError("Only active employees can apply for leave."); // R5
+  return emp;
+}
+
+async function typeId(tx: Queryable, code: string): Promise<string> {
+  const row = (await tx.query<{ id: string }>("select id from leave_type where code = $1 and active", [code]))[0];
+  if (!row) throw new DomainError("That kind of leave is not set up. Please contact HR.");
+  return row.id;
+}
+
+export async function applyMaternityTx(tx: Queryable, actor: Actor | null, input: MaternityInput): Promise<{ requestId: string; endDate: string }> {
+  requireEmployee(actor);
+  const today = todayIST();
+  const emp = await lockActiveEmployee(tx, actor.employeeId);
+  const check = checkMaternity({
+    today,
+    startDate: input.startDate,
+    expectedDelivery: input.expectedDeliveryDate,
+    survivingChildren: input.survivingChildren,
+    joiningDate: emp.joining_date,
+    gender: emp.gender,
+  });
+  if (!check.ok) throw new DomainError(check.error, check.field || undefined);
+  await assertNoOverlap(tx, actor.employeeId, input.startDate, check.endDate);
+
+  const created = await tx.query<{ id: string }>(
+    `insert into leave_request
+       (employee_id, leave_type_id, start_date, end_date, day_part, days, lop_days, reason, certificate_required,
+        expected_delivery_date, surviving_children)
+     values ($1, $2, $3, $4, 'full', $5, 0, $6, true, $7, $8) returning id`,
+    [actor.employeeId, await typeId(tx, "MAT"), input.startDate, check.endDate, check.days, input.reason ?? null, input.expectedDeliveryDate, input.survivingChildren],
+  );
+  await recordAudit(
+    {
+      actorEmployeeId: actor.employeeId,
+      action: "maternity_applied",
+      entity: "leave_request",
+      entityId: created[0].id,
+      summary: `${input.startDate} to ${check.endDate}, ${check.weeks} weeks`,
+    },
+    tx,
+  );
+  return { requestId: created[0].id, endDate: check.endDate };
+}
+
+export async function applyMaternity(actor: Actor | null, input: MaternityInput) {
+  requireEmployee(actor);
+  return transaction((tx) => applyMaternityTx(tx, actor, input));
+}
+
+export async function applyPaternityTx(tx: Queryable, actor: Actor | null, input: PaternityInput): Promise<{ requestId: string; days: number }> {
+  requireEmployee(actor);
+  const today = todayIST();
+  const emp = await lockActiveEmployee(tx, actor.employeeId);
+  const cal = await calendarAt(tx, actor.employeeId, input.startDate, input.endDate);
+  if (!cal) throw new DomainError("You have no job assignment on those dates. Please contact HR.", "startDate");
+
+  const { days } = countLeaveDays({ start: input.startDate, end: input.endDate, dayPart: "full", weeklyOffDays: cal.weeklyOffDays, holidays: cal.holidays });
+  const used = await tx.query<{ n: number }>(
+    `select coalesce(sum(lr.days), 0)::float8 as n
+       from leave_request lr join leave_type t on t.id = lr.leave_type_id
+      where t.code = 'PAT' and lr.employee_id = $1 and lr.birth_date = $2::date and lr.status in ('pending', 'approved')`,
+    [actor.employeeId, input.birthDate],
+  );
+  const check = checkPaternity({
+    today,
+    birthDate: input.birthDate,
+    startDate: input.startDate,
+    endDate: input.endDate,
+    days,
+    alreadyUsed: used[0].n,
+    gender: emp.gender,
+    addMonthsFn: addMonths,
+  });
+  if (!check.ok) throw new DomainError(check.error, check.field || undefined);
+  await assertNoOverlap(tx, actor.employeeId, input.startDate, input.endDate);
+
+  const created = await tx.query<{ id: string }>(
+    `insert into leave_request (employee_id, leave_type_id, start_date, end_date, day_part, days, lop_days, reason, birth_date)
+     values ($1, $2, $3, $4, 'full', $5, 0, $6, $7) returning id`,
+    [actor.employeeId, await typeId(tx, "PAT"), input.startDate, input.endDate, days, input.reason ?? null, input.birthDate],
+  );
+  await recordAudit(
+    {
+      actorEmployeeId: actor.employeeId,
+      action: "paternity_applied",
+      entity: "leave_request",
+      entityId: created[0].id,
+      summary: `${input.startDate} to ${input.endDate}, ${fmtDays(days)}`,
+    },
+    tx,
+  );
+  return { requestId: created[0].id, days };
+}
+
+export async function applyPaternity(actor: Actor | null, input: PaternityInput) {
+  requireEmployee(actor);
+  return transaction((tx) => applyPaternityTx(tx, actor, input));
+}
+
+// ---- comp-off ----
+
+export type CompoffCreditRow = { id: string; earnedOn: string; days: number; remaining: number; expiresOn: string; expired: boolean };
+export type CompoffRequestRow = {
+  id: string;
+  workedDate: string;
+  days: number;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  reason: string | null;
+  decisionNote: string | null;
+  canCancel: boolean;
+};
+export type CompoffApprovalRow = {
+  id: string;
+  employeeId: string;
+  employeeCode: string;
+  employeeName: string;
+  workedDate: string;
+  days: number;
+  reason: string | null;
+  waitingDays: number;
+};
+
+export async function getMyCompoff(actor: Actor | null): Promise<{ today: string; credits: CompoffCreditRow[]; requests: CompoffRequestRow[] }> {
+  requireEmployee(actor);
+  const today = todayIST();
+  const [credits, entries, requests] = await Promise.all([
+    compoffCredits({ query }, actor.employeeId),
+    query<{ id: string; entry_date: string; delta: number }>(
+      "select id::text, entry_date::text, delta::float8 as delta from leave_ledger where employee_id = $1 and reason = 'compoff_credit'",
+      [actor.employeeId],
+    ),
+    query<{ id: string; worked_date: string; days: number; status: CompoffRequestRow["status"]; reason: string | null; decision_note: string | null }>(
+      `select id, worked_date::text, days::float8 as days, status, reason, decision_note
+         from compoff_request where employee_id = $1 order by worked_date desc, created_at desc limit 25`,
+      [actor.employeeId],
+    ),
+  ]);
+  const entry = new Map(entries.map((e) => [e.id, e]));
+  return {
+    today,
+    credits: credits
+      .map((c) => ({
+        id: c.id,
+        earnedOn: entry.get(c.id)?.entry_date ?? "",
+        days: entry.get(c.id)?.delta ?? 0,
+        remaining: c.remaining,
+        expiresOn: c.expiresOn,
+        expired: c.expiresOn < today,
+      }))
+      .sort((a, b) => b.earnedOn.localeCompare(a.earnedOn)),
+    requests: requests.map((r) => ({
+      id: r.id,
+      workedDate: r.worked_date,
+      days: r.days,
+      status: r.status,
+      reason: r.reason,
+      decisionNote: r.decision_note,
+      canCancel: r.status === "pending",
+    })),
+  };
+}
+
+export async function requestCompoffTx(tx: Queryable, actor: Actor | null, input: CompoffInput): Promise<{ requestId: string }> {
+  requireEmployee(actor);
+  const today = todayIST();
+  await lockActiveEmployee(tx, actor.employeeId);
+  const cal = await calendarAt(tx, actor.employeeId, input.workedDate, input.workedDate);
+  if (!cal) throw new DomainError("You have no job assignment on that date. Please contact HR.", "workedDate");
+  const weekday = new Date(`${input.workedDate}T00:00:00Z`).getUTCDay();
+  const isOffDay = cal.weeklyOffDays.includes(weekday) || !!cal.holidays[input.workedDate];
+  const check = checkCompoff({ today, workedDate: input.workedDate, isOffDay, part: input.part });
+  if (!check.ok) throw new DomainError(check.error, check.field);
+
+  const dup = await tx.query("select 1 from compoff_request where employee_id = $1 and worked_date = $2::date and status in ('pending', 'approved')", [actor.employeeId, input.workedDate]);
+  if (dup.length > 0) throw new DomainError("You have already asked for comp-off for that day.", "workedDate");
+
+  const created = await tx.query<{ id: string }>(
+    "insert into compoff_request (employee_id, worked_date, days, reason) values ($1, $2, $3, $4) returning id",
+    [actor.employeeId, input.workedDate, check.days, input.reason ?? null],
+  );
+  await recordAudit(
+    { actorEmployeeId: actor.employeeId, action: "compoff_requested", entity: "compoff_request", entityId: created[0].id, summary: `Worked ${input.workedDate}, ${fmtDays(check.days)}` },
+    tx,
+  );
+  return { requestId: created[0].id };
+}
+
+export async function requestCompoff(actor: Actor | null, input: CompoffInput) {
+  requireEmployee(actor);
+  return transaction((tx) => requestCompoffTx(tx, actor, input));
+}
+
+export async function cancelCompoffTx(tx: Queryable, actor: Actor | null, requestId: string): Promise<void> {
+  requireEmployee(actor);
+  const req = (
+    await tx.query<{ employee_id: string; status: string; worked_date: string }>(
+      "select employee_id, status, worked_date::text from compoff_request where id = $1 for update",
+      [requestId],
+    )
+  )[0];
+  if (!req) throw new DomainError("That comp-off request was not found.");
+  if (req.employee_id !== actor.employeeId) throw new ForbiddenError("You cannot cancel this request.");
+  if (req.status !== "pending") throw new DomainError("Only a request that is still waiting can be cancelled.");
+  await tx.query("update compoff_request set status = 'cancelled' where id = $1", [requestId]);
+  await recordAudit({ actorEmployeeId: actor.employeeId, action: "compoff_cancelled", entity: "compoff_request", entityId: requestId, summary: `Worked ${req.worked_date}` }, tx);
+}
+
+export async function cancelCompoff(actor: Actor | null, requestId: string) {
+  requireEmployee(actor);
+  return transaction((tx) => cancelCompoffTx(tx, actor, requestId));
+}
+
+export async function decideCompoffTx(tx: Queryable, actor: Actor | null, input: DecisionInput): Promise<void> {
+  requireEmployee(actor);
+  const req = (
+    await tx.query<{ employee_id: string; status: string; worked_date: string; days: number }>(
+      "select employee_id, status, worked_date::text, days::float8 as days from compoff_request where id = $1 for update",
+      [input.requestId],
+    )
+  )[0];
+  if (!req) throw new DomainError("That comp-off request was not found.");
+  if (req.status !== "pending") throw new DomainError("This request has already been decided or cancelled.");
+  const allowed = canDecide({
+    actorEmployeeId: actor.employeeId,
+    actorIsHrAdmin: isHr(actor),
+    actorIsManagerOfRequester: await isManagerOf(tx, actor.employeeId, req.employee_id),
+    requesterEmployeeId: req.employee_id,
+  });
+  if (!allowed) throw new ForbiddenError("You cannot decide this request.");
+
+  let creditId: number | null = null;
+  if (input.decision === "approve") {
+    const today = todayIST();
+    const credit = await tx.query<{ id: string }>(
+      `insert into leave_ledger (employee_id, leave_type_id, leave_year, entry_date, delta, reason, expires_on, ref_key, note)
+       values ($1, $2, $3, $4, $5, 'compoff_credit', $6, $7, $8) returning id::text as id`,
+      [
+        req.employee_id,
+        await typeId(tx, "COMPOFF"),
+        Number(today.slice(0, 4)),
+        today,
+        req.days,
+        addDays(today, COMPOFF_EXPIRY_DAYS),
+        `compoff:${input.requestId}`,
+        `Comp-off for working on ${req.worked_date}`,
+      ],
+    );
+    creditId = Number(credit[0].id);
+  }
+  await tx.query(
+    `update compoff_request set status = $2, approver_id = $3, decided_at = now(), decision_note = $4, credit_entry_id = $5 where id = $1`,
+    [input.requestId, input.decision === "approve" ? "approved" : "rejected", actor.employeeId, input.note ?? null, creditId],
+  );
+  await recordAudit(
+    {
+      actorEmployeeId: actor.employeeId,
+      action: input.decision === "approve" ? "compoff_approved" : "compoff_rejected",
+      entity: "compoff_request",
+      entityId: input.requestId,
+      summary: `Worked ${req.worked_date}, ${fmtDays(req.days)}`,
+    },
+    tx,
+  );
+}
+
+export async function decideCompoff(actor: Actor | null, input: DecisionInput) {
+  requireEmployee(actor);
+  return transaction((tx) => decideCompoffTx(tx, actor, input));
+}
+
+export async function listCompoffApprovals(actor: Actor | null): Promise<CompoffApprovalRow[]> {
+  requireEmployee(actor);
+  const today = todayIST();
+  const rows = await query<{
+    id: string;
+    employee_id: string;
+    employee_code: string;
+    full_name: string;
+    worked_date: string;
+    days: number;
+    reason: string | null;
+    waiting: number;
+  }>(
+    `select cr.id, e.id as employee_id, e.employee_code, e.full_name, cr.worked_date::text, cr.days::float8 as days, cr.reason,
+            ($2::date - (cr.created_at at time zone 'Asia/Kolkata')::date)::int as waiting
+       from compoff_request cr join employee e on e.id = cr.employee_id
+      where cr.status = 'pending' and e.status = 'active' and e.id <> $1
+        and ($3::boolean or exists (
+              select 1 from employment_assignment a
+               where a.employee_id = e.id and a.manager_id = $1 and a.effective_to is null))
+      order by cr.created_at limit 100`,
+    [actor.employeeId, today, isHr(actor)],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    employeeId: r.employee_id,
+    employeeCode: r.employee_code,
+    employeeName: r.full_name,
+    workedDate: r.worked_date,
+    days: r.days,
+    reason: r.reason,
+    waitingDays: r.waiting,
+  }));
+}
+
+/** HR: write the expiry of comp-off days that have passed their date (R52). Safe to run again. */
+export async function runCompoffExpiryTx(tx: Queryable, actor: Actor | null): Promise<{ credits: number; days: number }> {
+  requireRole(actor, "hr_admin");
+  const today = todayIST();
+  const due = await tx.query<{ id: string; employee_id: string; type_id: string; remaining: number }>(
+    `select c.id::text as id, c.employee_id, c.leave_type_id as type_id,
+            (c.delta + coalesce(sum(r.delta), 0))::float8 as remaining
+       from leave_ledger c left join leave_ledger r on r.consumes_entry_id = c.id
+      where c.reason = 'compoff_credit' and c.expires_on < $1::date
+      group by c.id
+     having c.delta + coalesce(sum(r.delta), 0) > 0`,
+    [today],
+  );
+  let credits = 0;
+  let days = 0;
+  if (due.length > 0) {
+    const inserted = await tx.query<{ delta: number }>(
+      `insert into leave_ledger (employee_id, leave_type_id, leave_year, entry_date, delta, reason, consumes_entry_id, ref_key, note)
+       select * from unnest($1::uuid[], $2::uuid[], $3::smallint[], $4::date[], $5::numeric[], $6::text[], $7::bigint[], $8::text[], $9::text[])
+       on conflict (ref_key) where ref_key is not null do nothing
+       returning delta::float8 as delta`,
+      [
+        due.map((d) => d.employee_id),
+        due.map((d) => d.type_id),
+        due.map(() => Number(today.slice(0, 4))),
+        due.map(() => today),
+        due.map((d) => -d.remaining),
+        due.map(() => "expiry"),
+        due.map((d) => Number(d.id)),
+        due.map((d) => `compoff-expiry:${d.id}`),
+        due.map(() => "Comp-off expired after 60 days (R24)"),
+      ],
+    );
+    credits = inserted.length;
+    days = inserted.reduce((sum, r) => sum - r.delta, 0);
+  }
+  await recordAudit({ actorEmployeeId: actor.employeeId, action: "compoff_expiry_run", entity: "leave_ledger", summary: `${credits} credits, ${days} days expired` }, tx);
+  return { credits, days };
+}
+
+export async function runCompoffExpiry(actor: Actor | null) {
+  requireRole(actor, "hr_admin");
+  return transaction((tx) => runCompoffExpiryTx(tx, actor));
+}
+
+/** For the leave pages: which family-leave actions apply to this employee. */
+export async function getLeaveEligibility(actor: Actor | null): Promise<{ maternity: boolean; paternity: boolean }> {
+  requireEmployee(actor);
+  const facts = await getSelfFacts(actor);
+  return { maternity: facts?.gender === "female", paternity: facts?.gender === "male" };
 }

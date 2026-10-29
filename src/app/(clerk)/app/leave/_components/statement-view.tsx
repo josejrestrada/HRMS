@@ -16,6 +16,7 @@ const REASONS: Record<string, string> = {
   encashment: "Encashed",
   expiry: "Expired",
   adjustment: "Adjustment by HR",
+  compoff_credit: "Comp-off earned",
 };
 
 export function StatementView({ statement }: { statement: Statement }) {

@@ -37,6 +37,8 @@ export default async function LeaveAdminPage({ searchParams }: { searchParams: P
         }
       : undefined;
 
+  const compoffResult = first(sp.saved) === "compoff" ? { credits: first(sp.credits) ?? "0", days: first(sp.days) ?? "0" } : undefined;
+
   const requested = Number(first(sp.yearEnd));
   const yearEndYear = Number.isInteger(requested) && first(sp.yearEnd) ? requested : year;
   let yearEndPreview: YearEndSummary | undefined;
@@ -59,6 +61,7 @@ export default async function LeaveAdminPage({ searchParams }: { searchParams: P
       yearEndResult={yearEndResult}
       yearEndPreview={yearEndPreview}
       yearEndYear={yearEndYear}
+      compoffResult={compoffResult}
       error={error}
     />
   );

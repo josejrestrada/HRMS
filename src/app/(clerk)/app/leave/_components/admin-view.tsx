@@ -1,6 +1,6 @@
 import type { YearEndSummary } from "@/modules/leave/data";
 import { fmtDays } from "@/modules/leave/rules";
-import { runLeaveCreditsAction, runYearEndAction } from "../actions";
+import { runCompoffExpiryAction, runLeaveCreditsAction, runYearEndAction } from "../actions";
 import { LeaveTabs } from "./leave-tabs";
 
 export type YearEndResult = { year: string; people: string; lines: { code: string; lapsed: number; encashed: number; carried: number }[] };
@@ -43,6 +43,7 @@ export function AdminView(props: {
   yearEndResult?: YearEndResult;
   yearEndPreview?: YearEndSummary;
   yearEndYear: number;
+  compoffResult?: { credits: string; days: string };
   error?: string;
 }) {
   return (
@@ -64,6 +65,12 @@ export function AdminView(props: {
           {props.yearEndResult.lines.length === 0 ? " Nothing needed doing, or it had already been run." : ""}
         </div>
       ) : null}
+      {props.compoffResult ? (
+        <div className="alert alert-ok" role="status">
+          Comp-off expiry: {props.compoffResult.days} days from {props.compoffResult.credits} credits were expired.
+          {props.compoffResult.credits === "0" ? " Nothing had expired." : ""}
+        </div>
+      ) : null}
       {props.error ? <div className="alert alert-error" role="alert">{props.error}</div> : null}
 
       <section className="panel panel-form">
@@ -80,6 +87,19 @@ export function AdminView(props: {
           </div>
           <div className="form-actions">
             <button type="submit" className="btn btn-primary btn-small">Run leave credits</button>
+          </div>
+        </form>
+      </section>
+
+      <section className="panel panel-form">
+        <h2 className="panel-title">Expire old comp-off</h2>
+        <p className="muted">
+          Comp-off days last 60 days from approval. Expired days are already unavailable to employees; this writes the expiry to each
+          statement. It is safe to run again.
+        </p>
+        <form action={runCompoffExpiryAction} className="form">
+          <div className="form-actions">
+            <button type="submit" className="btn btn-secondary btn-small">Expire old comp-off</button>
           </div>
         </form>
       </section>

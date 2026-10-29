@@ -56,3 +56,13 @@ export function tenureText(from: string, to: string): string {
   if (months > 0) parts.push(`${months} ${months === 1 ? "month" : "months"}`);
   return parts.join(" ");
 }
+
+/** Adds whole months to a YYYY-MM-DD date, keeping the day where possible (31 Jan + 1 month = 28/29 Feb). */
+export function addMonths(isoDate: string, months: number): string {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const index = y * 12 + (m - 1) + months;
+  const year = Math.floor(index / 12);
+  const month = (index % 12) + 1;
+  const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${year}-${String(month).padStart(2, "0")}-${String(Math.min(d, last)).padStart(2, "0")}`;
+}

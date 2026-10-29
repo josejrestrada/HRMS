@@ -31,6 +31,25 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## Accepted
 
+## 2026-10-31 - Leave: maternity, paternity and comp-off (R9 to R11, R24)
+- **Status:** Accepted (2026-10-31, owner: "continue with the rest of leave"). Finishes the leave types left out of the first Leave slice.
+- **Maternity (R9):**
+  - **Entitlement:** 26 weeks if the employee has fewer than two surviving children, 12 weeks if two or more (Maternity Benefit Act, RESEARCH section 3). Counted in **calendar days**, not working days (R3 exception), and may cross a year end (exception to R33).
+  - **Dates:** the employee gives the expected delivery date, the number of surviving children and the start date. The start can be at most 8 weeks before the expected delivery date and no later than that date. The end date is worked out by the system (start plus the weeks, minus a day).
+  - **Who:** female employees only (gender must be recorded). There is no balance and no ledger entry; it is tracked on the request.
+  - **Eligibility check:** the Act needs 80 days actually worked in the 12 months before delivery. The system cannot know that yet, so it only blocks employees with less than 80 calendar days since joining; the approver sees the tenure and checks the rest. **Owner to confirm.**
+  - **Not covered:** miscarriage, medical termination, adoption or commissioning-mother leave, the work-from-home option after leave, and benefit payment (ESIC or employer). HR handles these outside the system for now.
+- **Paternity (R10):** 5 **working days** per child, for male employees, within 3 months of the birth date. The employee gives the birth date, which cannot be in the future. The days can be split across requests, but not more than 5 in total per birth date. No balance or ledger entry.
+- **Comp-off (R11, R24):**
+  - **Earning:** after working on a weekly off or holiday, the employee requests comp-off for that date (1 day or half a day) within **30 days** (assumption, owner to confirm). The date must really be a weekly off or holiday for their location. The manager or an HR admin approves (same rules as leave, no self-approval).
+  - **Credit:** approval adds a `compoff_credit` ledger entry that **expires 60 days after the approval date**. R11 says "prior approval required"; I read that as "approved before it is credited", not approval before working. **Owner to confirm.**
+  - **Using it:** comp-off is a leave type like CL. Days are used **earliest-expiring first**, each debit linked to its credit (`consumes_entry_id`), and the leave dates must be on or before the expiry date of the credits used.
+  - **Expiry:** unused days are unavailable from the day after they expire. An HR button writes the `expiry` entries (idempotent). Comp-off is not part of year end (R24).
+  - **Approved comp-off requests cannot be cancelled** in this slice; HR corrects them with an adjustment later. If an approved comp-off leave is cancelled, the days go back only to credits that have not expired.
+- **Technical:** how many days a request reserves from a balance is worked out from the leave type (maternity and paternity reserve nothing), so approve and cancel never write ledger rows for them. New columns on `leave_request`: `expected_delivery_date`, `surviving_children`, `birth_date`. New table `compoff_request`. The ledger reason list gains `compoff_credit`.
+- **Clarifications added to RESEARCH.md as R47 to R53.**
+- **Not in this slice:** automatic scheduled expiry, checking comp-off against actual punches, HR entering leave or comp-off on someone's behalf, and an HR adjustment screen.
+
 ## 2026-10-31 - Attendance module, first slice (punches and daily status)
 - **Status:** Accepted (2026-10-31, owner: "start attendance")
 - **In this slice:**

@@ -216,3 +216,131 @@ export function yearEndPlan(i: { available: number; cap: number; encashable: boo
   const excess = i.available - carry;
   return { carry, lapse: i.encashable ? 0 : excess, encash: i.encashable ? excess : 0 };
 }
+
+// ---------------------------------------------------------------------------------------------
+// Maternity, paternity and comp-off (R47 to R53)
+// ---------------------------------------------------------------------------------------------
+
+export const MATERNITY_PRE_DELIVERY_DAYS = 56; // 8 weeks
+export const MATERNITY_MIN_TENURE_DAYS = 80;
+export const PATERNITY_DAYS = 5;
+export const PATERNITY_MONTHS = 3;
+export const COMPOFF_EXPIRY_DAYS = 60;
+export const COMPOFF_CLAIM_WINDOW_DAYS = 30;
+
+type Fail = { ok: false; field: string; error: string };
+const fail = (field: string, error: string): Fail => ({ ok: false, field, error });
+
+/** R47: 26 weeks with fewer than two surviving children, otherwise 12. */
+export const maternityWeeks = (survivingChildren: number) => (survivingChildren >= 2 ? 12 : 26);
+
+export type MaternityCheck = { ok: true; weeks: number; endDate: string; days: number; tenureDays: number } | Fail;
+
+export function checkMaternity(i: {
+  today: string;
+  startDate: string;
+  expectedDelivery: string;
+  survivingChildren: number;
+  joiningDate: string;
+  gender: string | null;
+}): MaternityCheck {
+  if (i.gender !== "female") {
+    return fail("", "Maternity leave is for women employees. If your gender is not recorded correctly, please contact HR.");
+  }
+  if (i.expectedDelivery < addDays(i.today, -90) || i.expectedDelivery > addDays(i.today, 300)) {
+    return fail("expectedDeliveryDate", "Check the expected delivery date. It looks too far in the past or the future.");
+  }
+  if (i.startDate > i.expectedDelivery) {
+    return fail("startDate", "Maternity leave must start on or before the expected delivery date.");
+  }
+  if (i.startDate < addDays(i.expectedDelivery, -MATERNITY_PRE_DELIVERY_DAYS)) {
+    return fail("startDate", "Maternity leave can start at most 8 weeks before the expected delivery date.");
+  }
+  if (i.startDate < addDays(i.today, -7)) {
+    return fail("startDate", "This start date is more than 7 days ago. Please contact HR to enter it for you.");
+  }
+  const tenureDays = daysBetweenDates(i.joiningDate, i.startDate);
+  if (tenureDays < MATERNITY_MIN_TENURE_DAYS) {
+    return fail("", "Maternity benefit needs at least 80 days of service. Please contact HR to discuss your options.");
+  }
+  const weeks = maternityWeeks(i.survivingChildren);
+  const days = weeks * 7;
+  return { ok: true, weeks, endDate: addDays(i.startDate, days - 1), days, tenureDays };
+}
+
+function daysBetweenDates(from: string, to: string): number {
+  return Math.round((new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime()) / 86_400_000);
+}
+
+export type PaternityCheck = { ok: true; windowEnd: string } | Fail;
+
+/** R49: 5 working days per birth, within 3 months of the birth date, split across requests allowed. */
+export function checkPaternity(i: {
+  today: string;
+  birthDate: string;
+  startDate: string;
+  endDate: string;
+  days: number;
+  alreadyUsed: number;
+  gender: string | null;
+  addMonthsFn: (iso: string, n: number) => string;
+}): PaternityCheck {
+  if (i.gender !== "male") {
+    return fail("", "Paternity leave is for male employees. If your gender is not recorded correctly, please contact HR.");
+  }
+  if (i.birthDate > i.today) return fail("birthDate", "The birth date cannot be in the future.");
+  const windowEnd = i.addMonthsFn(i.birthDate, 3);
+  if (i.endDate < i.startDate) return fail("endDate", "The end date cannot be before the start date.");
+  if (i.startDate < i.birthDate) return fail("startDate", "Leave cannot start before the birth date.");
+  if (i.endDate > windowEnd) {
+    return fail("endDate", `Paternity leave must be taken within 3 months of the birth, by ${windowEnd}.`);
+  }
+  if (i.startDate < addDays(i.today, -7)) {
+    return fail("startDate", "This start date is more than 7 days ago. Please contact HR to enter it for you.");
+  }
+  if (i.days === 0) return fail("startDate", "Those dates are all weekly offs or holidays, so there is nothing to apply for.");
+  if (i.alreadyUsed + i.days > PATERNITY_DAYS) {
+    const left = Math.max(0, PATERNITY_DAYS - i.alreadyUsed);
+    return fail("endDate", `Paternity leave is ${fmtDays(PATERNITY_DAYS)} for each child. You have ${fmtDays(left)} left for this birth.`);
+  }
+  return { ok: true, windowEnd };
+}
+
+export type CompoffCheck = { ok: true; days: number } | Fail;
+
+/** R50: a worked weekly off or holiday, claimed within 30 days. */
+export function checkCompoff(i: { today: string; workedDate: string; isOffDay: boolean; part: "full" | "half" }): CompoffCheck {
+  if (i.workedDate > i.today) return fail("workedDate", "That date is in the future.");
+  if (i.workedDate < addDays(i.today, -COMPOFF_CLAIM_WINDOW_DAYS)) {
+    return fail("workedDate", "Comp-off must be claimed within 30 days of the day you worked.");
+  }
+  if (!i.isOffDay) return fail("workedDate", "That was a normal working day for you, so no comp-off applies.");
+  return { ok: true, days: i.part === "full" ? 1 : 0.5 };
+}
+
+export type CompoffCredit = { id: string; remaining: number; expiresOn: string };
+
+/** Days usable for leave that ends on `endDate`: credits that have not expired by then (R51). */
+export function compoffAvailable(credits: CompoffCredit[], endDate: string): number {
+  return credits.filter((c) => c.remaining > 0 && c.expiresOn >= endDate).reduce((sum, c) => sum + c.remaining, 0);
+}
+
+/** Earliest-expiring first (R51). Returns null when the usable credits do not cover `need`. */
+export function allocateCompoff(
+  credits: CompoffCredit[],
+  need: number,
+  endDate: string,
+): { creditId: string; amount: number }[] | null {
+  const usable = credits
+    .filter((c) => c.remaining > 0 && c.expiresOn >= endDate)
+    .sort((a, b) => (a.expiresOn === b.expiresOn ? a.id.localeCompare(b.id) : a.expiresOn.localeCompare(b.expiresOn)));
+  const out: { creditId: string; amount: number }[] = [];
+  let left = need;
+  for (const c of usable) {
+    if (left <= 0) break;
+    const take = Math.min(c.remaining, left);
+    out.push({ creditId: c.id, amount: take });
+    left -= take;
+  }
+  return left > 0 ? null : out;
+}

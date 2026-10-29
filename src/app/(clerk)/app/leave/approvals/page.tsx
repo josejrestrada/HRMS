@@ -1,5 +1,5 @@
 import { getCurrentActor } from "@/shared/auth";
-import { getApprovalScope, listApprovals } from "@/modules/leave/data";
+import { getApprovalScope, listApprovals, listCompoffApprovals } from "@/modules/leave/data";
 import { NoAccess, NotLinked } from "../../_components/ui";
 import { ApprovalsView } from "../_components/approvals-view";
 
@@ -12,8 +12,8 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
   const scope = await getApprovalScope(actor);
   if (!scope.canApprove) return <NoAccess />;
   const sp = await searchParams;
-  const rows = await listApprovals(actor);
+  const [rows, compoff] = await Promise.all([listApprovals(actor), listCompoffApprovals(actor)]);
   return (
-    <ApprovalsView rows={rows} pending={rows.length} isHr={actor.roles.includes("hr_admin")} saved={first(sp.saved)} error={first(sp.error)} />
+    <ApprovalsView rows={rows} compoff={compoff} pending={rows.length + compoff.length} isHr={actor.roles.includes("hr_admin")} saved={first(sp.saved)} error={first(sp.error)} />
   );
 }

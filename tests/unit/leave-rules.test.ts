@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   accrualMonths,
+  allocateCompoff,
   canCancel,
+  checkCompoff,
+  checkMaternity,
+  checkPaternity,
+  compoffAvailable,
+  maternityWeeks,
   canDecide,
   checkApplication,
   countLeaveDays,
@@ -12,6 +18,7 @@ import {
   workingDaysInMonth,
   yearEndPlan,
 } from "@/modules/leave/rules";
+import { addMonths } from "@/shared/dates";
 
 const SAT_SUN = [0, 6];
 
@@ -222,5 +229,107 @@ describe("yearEndPlan (R22, R23, R38)", () => {
   it("does nothing for a zero or negative balance", () => {
     expect(yearEndPlan({ available: 0, cap: 45, encashable: true })).toEqual({ carry: 0, lapse: 0, encash: 0 });
     expect(yearEndPlan({ available: -2, cap: 45, encashable: true })).toEqual({ carry: 0, lapse: 0, encash: 0 });
+  });
+});
+
+describe("maternity (R47, R48)", () => {
+  const base = { today: "2026-10-30", startDate: "2026-12-01", expectedDelivery: "2027-01-10", survivingChildren: 0, joiningDate: "2024-01-01", gender: "female" };
+
+  it("gives 26 weeks for fewer than two surviving children and 12 for two or more", () => {
+    expect([maternityWeeks(0), maternityWeeks(1), maternityWeeks(2), maternityWeeks(3)]).toEqual([26, 26, 12, 12]);
+  });
+
+  it("works out the end date and calendar days, even across a year end", () => {
+    const r = checkMaternity(base);
+    expect(r).toMatchObject({ ok: true, weeks: 26, days: 182, endDate: "2027-05-31" });
+    expect(checkMaternity({ ...base, survivingChildren: 2 })).toMatchObject({ weeks: 12, days: 84, endDate: "2027-02-22" });
+  });
+
+  it("starts at most 8 weeks before the delivery and not after it", () => {
+    expect(checkMaternity({ ...base, startDate: "2026-11-14" })).toMatchObject({ ok: false, field: "startDate" }); // 57 days before
+    expect(checkMaternity({ ...base, startDate: "2026-11-15" }).ok).toBe(true); // exactly 56 days before
+    expect(checkMaternity({ ...base, startDate: "2027-01-11" })).toMatchObject({ ok: false, field: "startDate" });
+  });
+
+  it("is only for female employees", () => {
+    expect(checkMaternity({ ...base, gender: "male" }).ok).toBe(false);
+    expect(checkMaternity({ ...base, gender: null }).ok).toBe(false);
+  });
+
+  it("blocks someone with under 80 days of service", () => {
+    expect(checkMaternity({ ...base, joiningDate: "2026-10-01" }).ok).toBe(false);
+    expect(checkMaternity({ ...base, joiningDate: "2026-09-12" }).ok).toBe(true); // 80 days to 1 Dec
+  });
+
+  it("refuses an old start date and an implausible delivery date", () => {
+    expect(checkMaternity({ ...base, startDate: "2026-10-20", expectedDelivery: "2026-11-10" }).ok).toBe(false);
+    expect(checkMaternity({ ...base, expectedDelivery: "2031-01-01" })).toMatchObject({ ok: false, field: "expectedDeliveryDate" });
+  });
+});
+
+describe("paternity (R49)", () => {
+  const base = { today: "2026-10-30", birthDate: "2026-10-25", startDate: "2026-11-02", endDate: "2026-11-06", days: 5, alreadyUsed: 0, gender: "male", addMonthsFn: addMonths };
+
+  it("accepts 5 working days within three months of the birth", () => {
+    expect(checkPaternity(base)).toEqual({ ok: true, windowEnd: "2027-01-25" });
+  });
+
+  it("is only for male employees", () => {
+    expect(checkPaternity({ ...base, gender: "female" }).ok).toBe(false);
+  });
+
+  it("refuses a future birth date, a start before the birth and an end after the window", () => {
+    expect(checkPaternity({ ...base, birthDate: "2026-11-05" })).toMatchObject({ ok: false, field: "birthDate" });
+    expect(checkPaternity({ ...base, startDate: "2026-10-24" })).toMatchObject({ ok: false, field: "startDate" });
+    expect(checkPaternity({ ...base, endDate: "2027-01-26" })).toMatchObject({ ok: false, field: "endDate" });
+  });
+
+  it("allows the days to be split but never more than 5 in total", () => {
+    expect(checkPaternity({ ...base, days: 2, alreadyUsed: 3 }).ok).toBe(true);
+    const r = checkPaternity({ ...base, days: 3, alreadyUsed: 3 });
+    expect(r).toMatchObject({ ok: false });
+    expect((r as { error: string }).error).toContain("2 days left");
+  });
+});
+
+describe("comp-off requests (R50)", () => {
+  const base = { today: "2026-10-30", workedDate: "2026-10-24", isOffDay: true, part: "full" as const };
+
+  it("gives 1 day or half a day for a worked weekly off or holiday", () => {
+    expect(checkCompoff(base)).toEqual({ ok: true, days: 1 });
+    expect(checkCompoff({ ...base, part: "half" })).toEqual({ ok: true, days: 0.5 });
+  });
+
+  it("refuses a normal working day, a future date and a claim older than 30 days", () => {
+    expect(checkCompoff({ ...base, isOffDay: false }).ok).toBe(false);
+    expect(checkCompoff({ ...base, workedDate: "2026-10-31" }).ok).toBe(false);
+    expect(checkCompoff({ ...base, workedDate: "2026-09-30" }).ok).toBe(true); // exactly 30 days
+    expect(checkCompoff({ ...base, workedDate: "2026-09-29" }).ok).toBe(false);
+  });
+});
+
+describe("comp-off credits (R51)", () => {
+  const credits = [
+    { id: "b", remaining: 1, expiresOn: "2026-12-20" },
+    { id: "a", remaining: 0.5, expiresOn: "2026-11-30" },
+    { id: "c", remaining: 1, expiresOn: "2026-11-10" },
+  ];
+
+  it("counts only credits that have not expired by the last leave date", () => {
+    expect(compoffAvailable(credits, "2026-11-05")).toBe(2.5);
+    expect(compoffAvailable(credits, "2026-11-30")).toBe(1.5);
+    expect(compoffAvailable(credits, "2027-01-01")).toBe(0);
+  });
+
+  it("uses the earliest-expiring credit first and splits across credits", () => {
+    expect(allocateCompoff(credits, 1.5, "2026-11-05")).toEqual([
+      { creditId: "c", amount: 1 },
+      { creditId: "a", amount: 0.5 },
+    ]);
+  });
+
+  it("returns null when the usable credits are not enough", () => {
+    expect(allocateCompoff(credits, 2, "2026-11-30")).toBeNull();
+    expect(allocateCompoff([], 0.5, "2026-11-05")).toBeNull();
   });
 });

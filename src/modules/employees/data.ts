@@ -567,3 +567,13 @@ export async function getWorkforce(
     weeklyOffDays: r.weekly_off_days ?? [0, 6],
   }));
 }
+
+/** The signed-in employee's own gender and joining date (used to check maternity and paternity eligibility). */
+export async function getSelfFacts(actor: Actor | null): Promise<{ gender: string | null; joiningDate: string } | null> {
+  requireRole(actor, "employee");
+  const rows = await query<{ gender: string | null; joining_date: string }>(
+    "select gender, joining_date::text from employee where id = $1 and status = 'active'",
+    [actor.employeeId],
+  );
+  return rows[0] ? { gender: rows[0].gender, joiningDate: rows[0].joining_date } : null;
+}

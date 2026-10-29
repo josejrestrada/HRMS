@@ -26,3 +26,31 @@ export const decisionSchema = z
 export type DecisionInput = z.infer<typeof decisionSchema>;
 
 export const requestIdSchema = z.uuid();
+
+const optionalReason = z.string().trim().max(300, "The reason is too long (300 characters at most)").optional();
+
+export const maternitySchema = z.object({
+  startDate: isoDate,
+  expectedDeliveryDate: isoDate,
+  survivingChildren: z.preprocess(
+    (v) => (v === undefined || v === "" ? NaN : Number(v)),
+    z.number({ error: "Enter how many surviving children you have (0 or more)" }).int("Enter a whole number").min(0, "Enter 0 or more").max(20, "Check the number of children"),
+  ),
+  reason: optionalReason,
+});
+export type MaternityInput = z.infer<typeof maternitySchema>;
+
+export const paternitySchema = z.object({
+  birthDate: isoDate,
+  startDate: isoDate,
+  endDate: isoDate,
+  reason: optionalReason,
+});
+export type PaternityInput = z.infer<typeof paternitySchema>;
+
+export const compoffSchema = z.object({
+  workedDate: isoDate,
+  part: z.enum(["full", "half"], { error: "Choose a full day or half a day" }),
+  reason: optionalReason,
+});
+export type CompoffInput = z.infer<typeof compoffSchema>;

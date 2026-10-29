@@ -146,6 +146,13 @@ A form per leave type: quota, accrual mode, carry-forward cap, encashment, max c
 - **Approvals** (`/app/leave/approvals`, managers and HR): pending requests with employee, type, dates, days, how long they have waited, and Approve / Reject (reason required).
 - **Admin** (`/app/leave/admin`, HR): the Run leave credits button, with a plain summary of what was added, and **Year-end processing**: choose a year, see a preview (people and days that would lapse, be encashed or carry forward, per leave type), then confirm. Confirming is only possible from 31 December.
 
+### 4.2b Maternity, paternity and comp-off pages (built)
+- **My leave** shows **Apply for maternity leave** only to female employees, **Apply for paternity leave** only to male employees, and **Request comp-off** to everyone. A Comp-off balance card appears once the employee has earned any, with the next expiry date.
+- **Maternity** (`/app/leave/maternity`): expected delivery date, surviving children, start date; the page shows the entitlement (26 or 12 weeks), the end date and the total days as you type.
+- **Paternity** (`/app/leave/paternity`): birth date, start and end date; the page shows the working days counted and how many of the 5 days are left for that birth date.
+- **Comp-off** (`/app/leave/comp-off`): worked date, full or half day, reason; below it, my comp-off requests and my comp-off credits with their expiry dates.
+- **Approvals** lists comp-off requests alongside leave requests, marked as comp-off.
+
 ### 4.12 Comp-off request
 A short form: the date worked on a weekly off or holiday, and a reason. It goes to the manager; on approval a credit appears in the CL/comp-off statement with its expiry date (R11). The statement shows days left before expiry, and the home screen warns when a credit expires within 14 days.
 

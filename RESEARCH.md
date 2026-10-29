@@ -147,6 +147,15 @@ These are my own design choices, informed by the research above. The statutory n
 - **R45.** Late marks are counted and shown against the monthly limit of 3. The half-day deduction of R26 is not applied until it has been checked against the law (P8).
 - **R46.** Until shifts exist (P1), every employee follows one working day per location, and a punch belongs to the IST date it happened on, so night shifts are not supported.
 
+### Clarifications from building maternity, paternity and comp-off (see docs/decisions.md)
+- **R47.** Maternity leave is 26 weeks for an employee with fewer than two surviving children and 12 weeks for two or more. It starts at most 8 weeks before the expected delivery date, and never after it. It counts calendar days, may cross a year end, and has no balance.
+- **R48.** Maternity leave is for female employees only. The system blocks anyone with less than 80 days since joining; the approver checks that 80 days were actually worked.
+- **R49.** Paternity leave is 5 working days per child, for male employees, taken within 3 months of the birth date. It can be split across requests, but not more than 5 days in total for one birth date.
+- **R50.** Comp-off is requested for a weekly off or holiday that was worked, for 1 day or half a day, within 30 days. The manager or an HR admin approves it, and nobody approves their own.
+- **R51.** An approved comp-off request adds a credit that expires 60 days after the approval date. Days are used earliest-expiring first and the leave dates must fall on or before the expiry.
+- **R52.** Unused comp-off days are unavailable after they expire. An HR action writes the expiry to the ledger. Comp-off is not part of year-end processing.
+- **R53.** An approved comp-off request cannot be cancelled by the employee. If approved comp-off leave is cancelled, the days return only to credits that have not expired.
+
 ### Still to resolve
 - Which Goa Act applies now (1973 or 2025) and its commencement date, and whether the plant in Verna is also covered by the Factories Act.
 - The official Goa 2026 holiday notification, to replace the tentative list in section 6.

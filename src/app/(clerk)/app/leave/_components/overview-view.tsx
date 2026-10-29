@@ -16,6 +16,7 @@ export function OverviewView(props: {
   canApprove: boolean;
   pending: number;
   isHr: boolean;
+  eligibility: { maternity: boolean; paternity: boolean };
   saved?: string;
   error?: string;
 }) {
@@ -29,9 +30,20 @@ export function OverviewView(props: {
           <h1>My leave</h1>
           <p className="muted">Your balances and requests.</p>
         </div>
-        <Link className="btn btn-primary btn-small" href="/app/leave/apply">
-          Apply for leave
-        </Link>
+        <ul className="quick-actions" aria-label="Apply">
+          <li>
+            <Link className="btn btn-primary btn-small" href="/app/leave/apply">Apply for leave</Link>
+          </li>
+          {props.eligibility.maternity ? (
+            <li><Link className="btn btn-secondary btn-small" href="/app/leave/maternity">Maternity leave</Link></li>
+          ) : null}
+          {props.eligibility.paternity ? (
+            <li><Link className="btn btn-secondary btn-small" href="/app/leave/paternity">Paternity leave</Link></li>
+          ) : null}
+          <li>
+            <Link className="btn btn-secondary btn-small" href="/app/leave/comp-off">Comp-off</Link>
+          </li>
+        </ul>
       </div>
       <LeaveTabs current="my" canApprove={props.canApprove} pending={props.pending} isHr={props.isHr} />
 
@@ -45,6 +57,7 @@ export function OverviewView(props: {
             <p className="big">{fmtDays(b.available).replace(/ days?$/, "")}<span className="unit"> available</span></p>
             <p className="muted">
               {b.annualQuota !== null ? `${fmtDays(b.annualQuota)} a year. ` : ""}
+              {b.code === "COMPOFF" ? "Each day lasts 60 days from approval. " : ""}
               {b.held > 0 ? `${fmtDays(b.held)} held for pending requests.` : "Nothing is held."}
             </p>
             <Link href={`/app/leave/statement/${b.code}`} className="card-link">
