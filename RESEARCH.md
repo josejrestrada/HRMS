@@ -134,6 +134,12 @@ These are my own design choices, informed by the research above. The statutory n
 - **R36.** Restricted holidays are not subtracted from leave days until employees can select them. Only national and state holidays and weekly offs are skipped (R3).
 - **R37.** The 7-day backdating limit (R19) is counted in calendar days. A request older than that is refused with a message to contact HR, until HR can enter leave on someone's behalf.
 
+### Clarifications from building year-end (see docs/decisions.md)
+- **R38.** Days held by a pending request are never lapsed or encashed at year end. They stay reserved until the request is decided.
+- **R39.** Encashment is recorded in days, with a note to pay at basic pay divided by 30 per day. Working out the rupee amount belongs to payroll, which is out of scope.
+- **R40.** Year-end runs for active employees only. Settling a leaver's balance (R8, R15) is a separate feature.
+- **R41.** The year-end run is idempotent per employee, leave type and year. If a balance changes after the run, a second run does not change it again; HR corrects it with an adjustment entry.
+
 ### Still to resolve
 - Which Goa Act applies now (1973 or 2025) and its commencement date, and whether the plant in Verna is also covered by the Factories Act.
 - The official Goa 2026 holiday notification, to replace the tentative list in section 6.

@@ -31,6 +31,18 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## Accepted
 
+## 2026-10-30 - Year-end leave processing (R22 to R25)
+- **Status:** Accepted (2026-10-30, owner: "go ahead"). This closes the "must ship before 31 Dec 2026" item from the Leave decision.
+- **What it does (HR admin, once a year):** for every active employee and each balance leave type (CL, SL, EL) it looks at the **available** balance (balance minus days held by pending requests). Up to the type's carry-forward cap (CL 0, SL 0, EL 45) is carried forward; anything above the cap is **encashed** if the type is encashable (EL) and otherwise **lapses** (CL and SL, which have a cap of 0, so they lapse in full).
+- **Ledger entries (R25):** `lapse`, `encashment`, and a `carry_forward` pair: a debit dated 31 December of the closing year and a credit dated 1 January of the new year, so the statement shows "carried forward to 2027" and "carried forward from 2026". The pair nets to zero, so the balance is unchanged. Each entry carries a note with the reason.
+- **Clarifications (added to RESEARCH.md as R38 to R41):**
+  - **R38:** days held by a pending request are never lapsed or encashed; they stay reserved until the request is decided.
+  - **R39:** encashment is recorded in days with the note "encash at basic pay / 30 per day"; the rupee amount is worked out by payroll, which is out of scope.
+  - **R40:** year-end runs for active employees only. The settlement of a leaver's balance (R8, R15) is a separate, later feature.
+  - **R41:** the run is idempotent with a unique key per employee, type and year. If a balance changes after the run (for example an approved leave is cancelled), a second run does not change it again; HR adjusts it with an adjustment entry.
+- **Safety:** it can only be run from 31 December of the current year (or for an earlier year). HR first sees a **preview** (people and days per leave type, nothing written), then confirms. The preview is read-only and can be opened at any time to see what would happen today.
+- **Not in this slice:** a scheduled run, the opening-balance import (P6), comp-off expiry (R24), exit settlement, and an HR screen for adjustment entries.
+
 ## 2026-10-30 - Leave module, first slice (CL, SL, EL and LOP)
 - **Status:** Accepted (2026-10-30, owner: "proceed with Leave"). Works on the P4 ledger decision.
 - **In scope:**

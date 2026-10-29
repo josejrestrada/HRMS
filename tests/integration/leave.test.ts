@@ -276,6 +276,56 @@ describe.skipIf(!enabled)("Leave rules against the database", () => {
     });
   });
 
+  it("year-end lapses CL and SL, carries EL up to 45 and encashes the rest, leaving held days alone", async () => {
+    await inTx(async (c, tx) => {
+      const hr = await person(c, "TESTDB-HR", { roles: ["hr_admin"] });
+      const me = await person(c, "TESTDB-E");
+      await credit(c, me, "CL", 5);
+      await credit(c, me, "SL", 3);
+      await credit(c, me, "EL", 50);
+      // A pending request holds 2 EL days: those days are not lapsed or encashed (R38).
+      await c.query("insert into leave_ledger (employee_id, leave_type_id, leave_year, entry_date, delta, reason) values ($1, $2, 2025, '2025-12-01', -2, 'pending_hold')", [me.employeeId, ids.EL]);
+
+      const run = await leave.runYearEndTx(tx, hr, { year: 2025 });
+      expect(run.applied).toBe(true);
+
+      expect(await bal(tx, me, "CL")).toEqual({ balance: 0, held: 0 });
+      expect(await bal(tx, me, "SL")).toEqual({ balance: 0, held: 0 });
+      // EL: balance 50, held 2 -> available 48 -> carry 45, encash 3 -> balance 47, hold untouched
+      expect(await bal(tx, me, "EL")).toEqual({ balance: 47, held: 2 });
+
+      const reasons = (await c.query("select reason, delta::float8 as delta, leave_year from leave_ledger where employee_id = $1 and leave_type_id = $2 and ref_key like 'yearend:%' order by ref_key", [me.employeeId, ids.EL])).rows;
+      expect(reasons).toEqual([
+        { reason: "carry_forward", delta: 45, leave_year: 2026 }, // cf-in
+        { reason: "carry_forward", delta: -45, leave_year: 2025 }, // cf-out
+        { reason: "encashment", delta: -3, leave_year: 2025 },
+      ]);
+    });
+  });
+
+  it("year-end is safe to run twice and adds nothing the second time", async () => {
+    await inTx(async (c, tx) => {
+      const hr = await person(c, "TESTDB-HR", { roles: ["hr_admin"] });
+      const me = await person(c, "TESTDB-E");
+      await credit(c, me, "CL", 4);
+      await leave.runYearEndTx(tx, hr, { year: 2025 });
+      const second = await leave.runYearEndTx(tx, hr, { year: 2025 });
+      expect(second.lines).toEqual([]);
+      expect(await bal(tx, me, "CL")).toEqual({ balance: 0, held: 0 });
+    });
+  });
+
+  it("year-end cannot be run early for the current year", async () => {
+    await inTx(async (c, tx) => {
+      const hr = await person(c, "TESTDB-HR", { roles: ["hr_admin"] });
+      const year = Number(todayIST().slice(0, 4));
+      if (todayIST() < `${year}-12-31`) {
+        await expect(leave.runYearEndTx(tx, hr, { year })).rejects.toThrow(/from 31 December/);
+      }
+      await expect(leave.runYearEndTx(tx, hr, { year: year + 1 })).rejects.toBeInstanceOf(DomainError);
+    });
+  });
+
   // ---- read-only ----
   it("reads the overview and approvals for a real HR admin without errors", async () => {
     const hrRow = (await pool.query("select e.id, e.employee_code, e.full_name from employee e join employee_role r on r.employee_id = e.id where r.role = 'hr_admin' and e.status = 'active' limit 1")).rows[0];

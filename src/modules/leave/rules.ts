@@ -200,3 +200,19 @@ export function canCancel(p: {
   if (p.actorEmployeeId !== p.requesterEmployeeId) return false;
   return p.status === "pending" || p.startDate >= p.today;
 }
+
+/**
+ * Year-end for one balance (R22, R23, R38): `available` is the balance minus days held by pending
+ * requests. Up to `cap` is carried forward; the excess is encashed if the type allows it, otherwise
+ * it lapses. A balance of zero or less produces no entries.
+ */
+export function yearEndPlan(i: { available: number; cap: number; encashable: boolean }): {
+  carry: number;
+  lapse: number;
+  encash: number;
+} {
+  if (!(i.available > 0)) return { carry: 0, lapse: 0, encash: 0 };
+  const carry = Math.min(i.available, Math.max(0, i.cap));
+  const excess = i.available - carry;
+  return { carry, lapse: i.encashable ? 0 : excess, encash: i.encashable ? excess : 0 };
+}

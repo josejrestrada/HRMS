@@ -140,7 +140,7 @@ A form per leave type: quota, accrual mode, carry-forward cap, encashment, max c
 - **Apply** (`/app/leave/apply`): the form from 4.2 with the live day count, the days skipped and why, the balance after, the rule line, the explicit "use the shortfall as leave without pay" choice, and a medical-certificate notice for sick leave over 2 days.
 - **Statement** (`/app/leave/statement/[type]`): every credit, hold, debit and cancellation with its reason and running balance.
 - **Approvals** (`/app/leave/approvals`, managers and HR): pending requests with employee, type, dates, days, how long they have waited, and Approve / Reject (reason required).
-- **Admin** (`/app/leave/admin`, HR): the Run leave credits button, with a plain summary of what was added.
+- **Admin** (`/app/leave/admin`, HR): the Run leave credits button, with a plain summary of what was added, and **Year-end processing**: choose a year, see a preview (people and days that would lapse, be encashed or carry forward, per leave type), then confirm. Confirming is only possible from 31 December.
 
 ### 4.12 Comp-off request
 A short form: the date worked on a weekly off or holiday, and a reason. It goes to the manager; on approval a credit appears in the CL/comp-off statement with its expiry date (R11). The statement shows days left before expiry, and the home screen warns when a credit expires within 14 days.

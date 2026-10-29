@@ -50,7 +50,7 @@ export function StatementView({ statement }: { statement: Statement }) {
                   <tr key={e.id} className={e.isHold ? "row-hold" : undefined}>
                     <td>{formatDate(e.date)}</td>
                     <td>
-                      {REASONS[e.reason] ?? e.reason}
+                      {e.reason === "carry_forward" ? (e.delta < 0 ? "Carried forward to next year" : "Carried forward from last year") : (REASONS[e.reason] ?? e.reason)}
                       {e.note ? <span className="sub">{e.note}</span> : null}
                     </td>
                     <td className="num">{e.delta > 0 ? `+${e.delta}` : e.delta}</td>

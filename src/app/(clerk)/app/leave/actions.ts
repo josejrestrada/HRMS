@@ -6,7 +6,7 @@ import { z } from "zod";
 import { getCurrentActor } from "@/shared/auth";
 import { DomainError } from "@/shared/errors";
 import { ForbiddenError, requireRole } from "@/shared/roles";
-import { applyLeave, cancelLeave, decideLeave, runLeaveCredits } from "@/modules/leave/data";
+import { applyLeave, cancelLeave, decideLeave, runLeaveCredits, runYearEnd } from "@/modules/leave/data";
 import { applyLeaveSchema, decisionSchema, requestIdSchema } from "@/modules/leave/schemas";
 import { blankToUndefined, formValues } from "@/shared/validation";
 
@@ -96,5 +96,24 @@ export async function runLeaveCreditsAction(formData: FormData) {
       grants: String(summary.grants),
       accruals: String(summary.accruals),
     }).toString()}`,
+  );
+}
+
+export async function runYearEndAction(formData: FormData) {
+  const actor = await requireActor();
+  requireRole(actor, "hr_admin");
+  const year = Number(formValues(formData).year);
+  if (!Number.isInteger(year)) backWithError("/app/leave/admin", "Choose a year.");
+  let summary;
+  try {
+    summary = await runYearEnd(actor, { year });
+  } catch (err) {
+    if (err instanceof DomainError) backWithError("/app/leave/admin", err.message);
+    throw err;
+  }
+  revalidatePath("/app/leave", "layout");
+  const lines = summary.lines.map((l) => `${l.code}:${l.lapsed}:${l.encashed}:${l.carried}`).join(",");
+  redirect(
+    `/app/leave/admin?${new URLSearchParams({ saved: "yearend", year: String(summary.year), people: String(summary.employees), lines }).toString()}`,
   );
 }

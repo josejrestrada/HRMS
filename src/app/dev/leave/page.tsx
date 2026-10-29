@@ -74,7 +74,24 @@ export default async function LeavePreview({ searchParams }: { searchParams: Pro
           ) : view === "approvals" ? (
             <ApprovalsView rows={approvals} pending={2} isHr saved="approved" />
           ) : view === "admin" ? (
-            <AdminView year={2026} canApprove pending={2} result={{ year: "2026", grants: "46", accruals: "180" }} />
+            <AdminView
+              year={2026}
+              canApprove
+              pending={2}
+              result={{ year: "2026", grants: "46", accruals: "180" }}
+              yearEndYear={2026}
+              yearEndPreview={{
+                year: 2026,
+                applied: false,
+                canRun: false,
+                employees: 23,
+                lines: [
+                  { code: "CL", name: "Casual leave", people: 21, lapsed: 74, encashed: 0, carried: 0 },
+                  { code: "SL", name: "Sick leave", people: 23, lapsed: 190.5, encashed: 0, carried: 0 },
+                  { code: "EL", name: "Earned leave", people: 23, lapsed: 0, encashed: 12, carried: 388.5 },
+                ],
+              }}
+            />
           ) : (
             <OverviewView overview={overview} canApprove pending={2} isHr saved="applied" />
           )}

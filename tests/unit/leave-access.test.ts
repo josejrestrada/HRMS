@@ -31,8 +31,22 @@ describe("every leave function refuses a missing actor without touching the data
     ["cancelLeave", () => leave.cancelLeave(null, id)],
     ["decideLeave", () => leave.decideLeave(null, { requestId: id, decision: "approve" })],
     ["runLeaveCredits", () => leave.runLeaveCredits(null)],
+    ["previewYearEnd", () => leave.previewYearEnd(null, 2026)],
+    ["runYearEnd", () => leave.runYearEnd(null, { year: 2026 })],
   ])("%s", async (_n, run) => {
     await expect(run()).rejects.toBeInstanceOf(ForbiddenError);
+    expect(queryMock).not.toHaveBeenCalled();
+    expect(transactionMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("year-end is for HR admins only", () => {
+  it("rejects an ordinary employee before any query", async () => {
+    await expect(leave.previewYearEnd(employee, 2026)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(leave.runYearEnd(employee, { year: 2026 })).rejects.toBeInstanceOf(ForbiddenError);
+    const tx = { query: vi.fn() };
+    await expect(leave.runYearEndTx(tx, employee, { year: 2026 })).rejects.toBeInstanceOf(ForbiddenError);
+    expect(tx.query).not.toHaveBeenCalled();
     expect(queryMock).not.toHaveBeenCalled();
     expect(transactionMock).not.toHaveBeenCalled();
   });

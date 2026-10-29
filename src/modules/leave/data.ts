@@ -16,6 +16,7 @@ import {
   lastDayOfMonth,
   proratedGrant,
   workingDaysInMonth,
+  yearEndPlan,
   type DayPart,
 } from "./rules";
 
@@ -672,4 +673,144 @@ export async function runLeaveCreditsTx(tx: Queryable, actor: Actor | null, opts
 export async function runLeaveCredits(actor: Actor | null, opts: { year?: number } = {}) {
   requireRole(actor, "hr_admin");
   return transaction((tx) => runLeaveCreditsTx(tx, actor, opts));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Year end (HR): lapse, carry forward and encash (R22 to R25, R38 to R41). Preview, then run.
+// ---------------------------------------------------------------------------------------------
+
+export type YearEndLine = { code: string; name: string; people: number; lapsed: number; encashed: number; carried: number };
+export type YearEndSummary = { year: number; applied: boolean; canRun: boolean; employees: number; lines: YearEndLine[] };
+
+type YearEndEntry = { employee: string; type: string; code: string; year: number; date: string; delta: number; reason: string; key: string; note: string };
+
+function checkYearEndYear(year: number, today: string) {
+  const currentYear = Number(today.slice(0, 4));
+  if (!Number.isInteger(year) || year < 2000 || year > currentYear) {
+    throw new DomainError("Choose the current year or an earlier one.");
+  }
+  return { canRun: year < currentYear || today >= `${year}-12-31` };
+}
+
+async function planYearEnd(q: Queryable, year: number): Promise<{ entries: YearEndEntry[]; lines: Map<string, YearEndLine> }> {
+  const rows = await q.query<{
+    employee_id: string;
+    type_id: string;
+    code: string;
+    name: string;
+    cap: number | null;
+    encashable: boolean;
+    balance: number;
+    held: number;
+  }>(
+    `select e.id as employee_id, t.id as type_id, t.code, t.name, t.carry_forward_cap::float8 as cap, t.encashable,
+            coalesce(sum(l.delta) filter (where l.reason not in (${HOLDS})), 0)::float8 as balance,
+            coalesce(-sum(l.delta) filter (where l.reason in (${HOLDS})), 0)::float8 as held
+       from employee e
+       cross join leave_type t
+       left join leave_ledger l on l.employee_id = e.id and l.leave_type_id = t.id
+      where e.status = 'active' and t.active and t.annual_quota is not null and t.accrual_mode in ('upfront', 'monthly')
+      group by e.id, t.id
+      order by t.code, e.id`,
+  );
+
+  const entries: YearEndEntry[] = [];
+  const lines = new Map<string, YearEndLine>();
+  const end = `${year}-12-31`;
+  const nextStart = `${year + 1}-01-01`;
+
+  for (const r of rows) {
+    const plan = yearEndPlan({ available: r.balance - r.held, cap: r.cap ?? 0, encashable: r.encashable });
+    if (plan.carry === 0 && plan.lapse === 0 && plan.encash === 0) continue;
+    const line = lines.get(r.code) ?? { code: r.code, name: r.name, people: 0, lapsed: 0, encashed: 0, carried: 0 };
+    line.people += 1;
+    line.lapsed += plan.lapse;
+    line.encashed += plan.encash;
+    line.carried += plan.carry;
+    lines.set(r.code, line);
+
+    const base = { employee: r.employee_id, type: r.type_id, code: r.code };
+    const key = (kind: string) => `yearend:${year}:${r.employee_id}:${r.code}:${kind}`;
+    if (plan.lapse > 0) {
+      entries.push({ ...base, year, date: end, delta: -plan.lapse, reason: "lapse", key: key("lapse"), note: `${r.name} lapsed at the end of ${year} (R22)` });
+    }
+    if (plan.encash > 0) {
+      entries.push({ ...base, year, date: end, delta: -plan.encash, reason: "encashment", key: key("encash"), note: `${plan.encash} days to encash at basic pay / 30 per day (R23)` });
+    }
+    if (plan.carry > 0) {
+      entries.push({ ...base, year, date: end, delta: -plan.carry, reason: "carry_forward", key: key("cf-out"), note: `Carried forward to ${year + 1}` });
+      entries.push({ ...base, year: year + 1, date: nextStart, delta: plan.carry, reason: "carry_forward", key: key("cf-in"), note: `Carried forward from ${year}` });
+    }
+  }
+  return { entries, lines };
+}
+
+/** Read-only: what a year-end run would do right now. Nothing is written. */
+export async function previewYearEnd(actor: Actor | null, year: number): Promise<YearEndSummary> {
+  requireRole(actor, "hr_admin");
+  const { canRun } = checkYearEndYear(year, todayIST());
+  const { entries, lines } = await planYearEnd({ query }, year);
+  const people = new Set(entries.map((e) => e.employee));
+  return { year, applied: false, canRun, employees: people.size, lines: [...lines.values()] };
+}
+
+export async function runYearEndTx(tx: Queryable, actor: Actor | null, opts: { year: number }): Promise<YearEndSummary> {
+  requireRole(actor, "hr_admin");
+  const { canRun } = checkYearEndYear(opts.year, todayIST());
+  if (!canRun) throw new DomainError(`Year-end can only be run from 31 December ${opts.year}.`);
+
+  const { entries, lines: planned } = await planYearEnd(tx, opts.year);
+  const lines = new Map<string, YearEndLine>();
+  const people = new Set<string>();
+
+  if (entries.length > 0) {
+    const inserted = await tx.query<{ employee_id: string; reason: string; delta: number; k: string }>(
+      `insert into leave_ledger (employee_id, leave_type_id, leave_year, entry_date, delta, reason, ref_key, note)
+       select * from unnest($1::uuid[], $2::uuid[], $3::smallint[], $4::date[], $5::numeric[], $6::text[], $7::text[], $8::text[])
+       on conflict (ref_key) where ref_key is not null do nothing
+       returning employee_id, reason, delta::float8 as delta, ref_key as k`,
+      [
+        entries.map((e) => e.employee),
+        entries.map((e) => e.type),
+        entries.map((e) => e.year),
+        entries.map((e) => e.date),
+        entries.map((e) => e.delta),
+        entries.map((e) => e.reason),
+        entries.map((e) => e.key),
+        entries.map((e) => e.note),
+      ],
+    );
+    const codeOfKey = (k: string) => k.split(":")[3];
+    for (const r of inserted) {
+      people.add(r.employee_id);
+      const code = codeOfKey(r.k);
+      const line = lines.get(code) ?? { code, name: planned.get(code)?.name ?? code, people: 0, lapsed: 0, encashed: 0, carried: 0 };
+      if (r.reason === "lapse") line.lapsed += -r.delta;
+      else if (r.reason === "encashment") line.encashed += -r.delta;
+      else if (r.reason === "carry_forward" && r.delta < 0) line.carried += -r.delta;
+      lines.set(code, line);
+    }
+    const perType = new Map<string, Set<string>>();
+    for (const r of inserted) {
+      const code = codeOfKey(r.k);
+      perType.set(code, (perType.get(code) ?? new Set()).add(r.employee_id));
+    }
+    for (const [code, set] of perType) lines.get(code)!.people = set.size;
+  }
+
+  await recordAudit(
+    {
+      actorEmployeeId: actor.employeeId,
+      action: "leave_year_end_run",
+      entity: "leave_ledger",
+      summary: `Year ${opts.year}: ${[...lines.values()].map((l) => `${l.code} lapsed ${l.lapsed}, encashed ${l.encashed}, carried ${l.carried}`).join("; ") || "nothing to do"}`,
+    },
+    tx,
+  );
+  return { year: opts.year, applied: true, canRun: true, employees: people.size, lines: [...lines.values()] };
+}
+
+export async function runYearEnd(actor: Actor | null, opts: { year: number }) {
+  requireRole(actor, "hr_admin");
+  return transaction((tx) => runYearEndTx(tx, actor, opts));
 }

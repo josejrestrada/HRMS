@@ -10,6 +10,7 @@ import {
   fmtDays,
   proratedGrant,
   workingDaysInMonth,
+  yearEndPlan,
 } from "@/modules/leave/rules";
 
 const SAT_SUN = [0, 6];
@@ -197,5 +198,29 @@ describe("who may decide or cancel (R20, R31)", () => {
 describe("fmtDays", () => {
   it("formats singular, plural and halves", () => {
     expect([fmtDays(1), fmtDays(2), fmtDays(0.5), fmtDays(2.5)]).toEqual(["1 day", "2 days", "0.5 day", "2.5 days"]);
+  });
+});
+
+describe("yearEndPlan (R22, R23, R38)", () => {
+  it("lapses all casual and sick leave, which have a carry-forward cap of 0", () => {
+    expect(yearEndPlan({ available: 5, cap: 0, encashable: false })).toEqual({ carry: 0, lapse: 5, encash: 0 });
+  });
+
+  it("carries earned leave up to 45 days and encashes the excess", () => {
+    expect(yearEndPlan({ available: 50, cap: 45, encashable: true })).toEqual({ carry: 45, lapse: 0, encash: 5 });
+    expect(yearEndPlan({ available: 45, cap: 45, encashable: true })).toEqual({ carry: 45, lapse: 0, encash: 0 });
+  });
+
+  it("carries everything when the balance is under the cap", () => {
+    expect(yearEndPlan({ available: 12.5, cap: 45, encashable: true })).toEqual({ carry: 12.5, lapse: 0, encash: 0 });
+  });
+
+  it("lapses (not encashes) the excess for a type that cannot be encashed", () => {
+    expect(yearEndPlan({ available: 10, cap: 4, encashable: false })).toEqual({ carry: 4, lapse: 6, encash: 0 });
+  });
+
+  it("does nothing for a zero or negative balance", () => {
+    expect(yearEndPlan({ available: 0, cap: 45, encashable: true })).toEqual({ carry: 0, lapse: 0, encash: 0 });
+    expect(yearEndPlan({ available: -2, cap: 45, encashable: true })).toEqual({ carry: 0, lapse: 0, encash: 0 });
   });
 });

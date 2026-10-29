@@ -1440,3 +1440,18 @@ textarea {
     flex: 0 0 440px;
   }
 }
+
+.yearend-preview {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.yearend-preview h3 {
+  margin-bottom: 4px;
+  font-size: 1rem;
+}
+
+.yearend-preview .table-wrap {
+  margin: 12px 0 16px;
+}
