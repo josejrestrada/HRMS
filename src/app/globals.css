@@ -112,6 +112,7 @@ p {
 .btn {
   display: inline-flex;
   flex-direction: column;
+  text-decoration: none;
   align-items: center;
   justify-content: center;
   min-height: 44px;
@@ -129,15 +130,10 @@ p {
   color: var(--primary-contrast);
 }
 
-.btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-note {
-  font-size: 0.7rem;
-  font-weight: 500;
-  opacity: 0.9;
+.btn-secondary {
+  background: transparent;
+  color: var(--primary);
+  border: 2px solid var(--primary);
 }
 
 /* hero */
@@ -170,13 +166,63 @@ p {
   color: var(--muted);
 }
 
-.access-note {
-  max-width: 52ch;
-  padding: 10px 16px;
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.hero-actions .btn {
+  min-width: 160px;
+}
+
+/* auth pages */
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px 16px;
+}
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.auth-note {
+  max-width: 40ch;
+  padding: 8px 14px;
   border-radius: 10px;
   background: var(--warning-bg);
   color: var(--warning-text);
-  font-size: 0.95rem;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.signed-in-card {
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 28px 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.signed-in-card p {
+  color: var(--muted);
 }
 
 /* modules */

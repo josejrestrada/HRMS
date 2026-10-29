@@ -58,10 +58,10 @@ Navigation: left sidebar on desktop, bottom tab bar (Home, Leave, Attendance, Ap
 
 ### 4.0 Landing page (public)
 The only page visible before signing in.
-- **Header:** logo and "Konkan Coastal Foods HRMS" on the left; **Sign in** button on the right (disabled with "coming soon" until Clerk is wired).
+- **Header:** logo and "Konkan Coastal Foods HRMS" on the left; **Sign in** link on the right.
 - **Hero:** heading "People operations for Konkan Coastal Foods" and one sentence: employee records, attendance and leave for the Panaji head office and the Verna plant.
 - **Modules:** four cards (Employee Master, Attendance, Leave, HR Assistant), each with a short description and a **Planned** chip until built.
-- **Access note:** "Access is by invitation from HR. If you need an account, please contact HR."
+- **Actions:** **Sign in** (primary) and **Create account** (secondary) buttons under the hero text. Creating an account only works with an invitation from HR; the sign-up page says so, and Clerk enforces it.
 - **Footer:** company name and year.
 - Shows no employee data and makes no claim about features that do not exist yet. Works from 320px wide, supports light and dark, keyboard focus is visible, and there is a skip-to-content link.
 

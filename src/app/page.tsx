@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 
 type Module = { name: string; description: string; icon: ReactNode };
 
@@ -79,16 +80,9 @@ export default function HomePage() {
             <img src="/logo.svg" alt="" width={36} height={36} />
             <span className="brand-name">Konkan Coastal Foods HRMS</span>
           </div>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled
-            aria-disabled="true"
-            title="Sign in is coming soon"
-          >
+          <Link className="btn btn-primary" href="/sign-in">
             Sign in
-            <span className="btn-note">coming soon</span>
-          </button>
+          </Link>
         </div>
       </header>
 
@@ -108,9 +102,14 @@ export default function HomePage() {
               Employee records, attendance and leave in one place, for the Panaji head office and
               the Verna plant.
             </p>
-            <p className="access-note">
-              Access is by invitation from HR. If you need an account, please contact HR.
-            </p>
+            <div className="hero-actions">
+              <Link className="btn btn-primary" href="/sign-in">
+                Sign in
+              </Link>
+              <Link className="btn btn-secondary" href="/sign-up">
+                Create account
+              </Link>
+            </div>
           </div>
         </section>
 

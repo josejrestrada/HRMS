@@ -31,6 +31,14 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## Accepted
 
+## 2026-10-29 - Landing page shows Sign in and Create account; Clerk wired in
+- **Status:** Accepted (2026-10-29, owner asked: show login/signup instead of the "access by invitation" line)
+- **Decision:** the landing page hero shows **Sign in** and **Create account** buttons in place of the invitation note. Clerk is wired in now (it was planned for Foundation): `/sign-in`, `/sign-up`, and a signed-in `/app` page.
+- **Invite-only still applies (P2):** Clerk must be set to Restricted sign-up, so "Create account" only works with an invitation from HR. The sign-up page says so. A signed-in user with no linked employee record sees no data, only a "ask HR" message.
+- **Isolation:** the landing page does not load Clerk, so it works even if Clerk keys are missing. Clerk runs only on `/sign-in`, `/sign-up` and `/app` (`proxy.ts` matcher limited to those paths).
+- **Supersedes:** the "Sign in disabled / coming soon" and access-note parts of the 2026-10-29 landing-page entry.
+- **Needs from owner:** Clerk Restricted sign-up turned on; the three environment variables present in Vercel before deploying this change.
+
 ## 2026-10-29 - Public landing page (new screen)
 - **Status:** Accepted (2026-10-29, owner asked for it)
 - **Decision:** the home page becomes a public landing page: header with logo, name and a Sign in button; a hero with a one-line purpose; four module cards (Employee Master, Attendance, Leave, HR Assistant) each marked Planned until built; a note that access is by invitation from HR; footer. No employee data and no claims about unbuilt features.
