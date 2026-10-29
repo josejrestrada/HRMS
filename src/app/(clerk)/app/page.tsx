@@ -1,25 +1,39 @@
 import { redirect } from "next/navigation";
-import { UserButton } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
+import { getCurrentActor } from "@/shared/auth";
+import { getHrDashboard } from "@/modules/reports/data";
+import { HrDashboardView } from "./_components/hr-dashboard";
 
-// Placeholder signed-in page. Until the account is linked to an employee record
-// (decision P2), a signed-in user sees no data, only this message.
-// The check happens here on the server as well as in proxy.ts: the proxy is only
-// an early redirect, not the access control.
+// The proxy is only an early redirect. The real checks are here: signed in, linked to an
+// employee, and (for the HR dashboard) holding the hr_admin role, checked again inside
+// getHrDashboard.
 export default async function AppHomePage() {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
-  return (
-    <main className="auth-page">
-      <div className="signed-in-card">
-        <UserButton />
-        <h1>You are signed in</h1>
+  const actor = await getCurrentActor();
+
+  if (!actor) {
+    return (
+      <div className="notice-card">
+        <h1>Your account is not linked yet</h1>
         <p>
-          Your account is not linked to an employee record yet, so there is nothing to show. Please
-          ask HR to finish setting up your access.
+          You are signed in, but your account is not linked to an employee record, so there is
+          nothing to show. Please ask HR to finish setting up your access.
         </p>
       </div>
-    </main>
+    );
+  }
+
+  if (actor.roles.includes("hr_admin")) {
+    const data = await getHrDashboard(actor);
+    return <HrDashboardView data={data} />;
+  }
+
+  return (
+    <div className="notice-card">
+      <h1>Welcome, {actor.fullName}</h1>
+      <p>Your dashboard is coming soon. For now, please contact HR for anything you need.</p>
+    </div>
   );
 }

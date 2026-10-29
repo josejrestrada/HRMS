@@ -31,6 +31,18 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## Accepted
 
+## 2026-10-29 - Database foundation first, then the HR admin dashboard
+- **Status:** Accepted (2026-10-29, owner chose "real foundation first" and "HR admin first")
+- **Scope of this slice:**
+  - **Schema (migration 001):** `location`, `employee` (immutable employee code from a sequence, trigger blocks changes), `employment_assignment` (P5), `employee_role` (P2), `leave_type`, `leave_request`, `holiday` (with a `verified` flag), `attendance_day`, `audit_log` (append-only by trigger). Deferred to their own phases: `leave_ledger` and holds (P4), `punch`, `compoff_request`, `employee_private`, shifts (P1, still proposed).
+  - **Migrations:** plain forward-only SQL in `db/migrations`, applied by `scripts/migrate.mjs`, which records applied files in a `schema_migration` table and never drops anything.
+  - **Identity (P2):** `getCurrentUser()` reads the Clerk session, then loads the employee and roles from the database. An unlinked Clerk user is linked only when their verified primary email matches exactly one active employee with no Clerk link; otherwise they have no access. Roles never come from token claims.
+  - **Data access (P3):** one `db` module under `src/shared`, imported only by module data-access files; a script (`npm run check:boundaries`) fails if routes, pages or components import it. Every data function takes the acting user and checks the role inside.
+  - **HR dashboard:** headcount by location and status, on leave today, pending leave requests, attendance today, upcoming holidays, recent joiners. No Aadhaar, PAN, bank or salary data. Visible only to `hr_admin`; other roles see a "coming soon" message.
+  - **Dates (IST):** one `dates` helper computes "today" in `Asia/Kolkata`; no code uses the server's local date.
+  - **Test data:** seed script creates clearly fake employees (`TEST` names, `@example.invalid` emails) plus one HR admin whose email comes from `HR_ADMIN_EMAIL` in `.env.local`. The seed refuses to run without `ALLOW_SEED=yes`. Goa holiday rows are marked `verified = false` (tentative list, RESEARCH section 6).
+- **Note:** there is only one Neon project, so test data and real data would share it. Create a separate Neon branch for development before loading real employees.
+
 ## 2026-10-29 - Landing page shows Sign in and Create account; Clerk wired in
 - **Status:** Accepted (2026-10-29, owner asked: show login/signup instead of the "access by invitation" line)
 - **Decision:** the landing page hero shows **Sign in** and **Create account** buttons in place of the invitation note. Clerk is wired in now (it was planned for Foundation): `/sign-in`, `/sign-up`, and a signed-in `/app` page.
