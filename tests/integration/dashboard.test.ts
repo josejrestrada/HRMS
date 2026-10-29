@@ -17,7 +17,8 @@ describe.skipIf(!enabled)("HR dashboard against the database (read-only)", () =>
     expect(d.attention.unassigned).toBe(d.headcount.total - assigned);
     expect(d.onLeaveTotal).toBeGreaterThanOrEqual(d.onLeave.length);
     expect(d.pending.items.length).toBeLessThanOrEqual(d.pending.count);
-    expect(d.attendance.recorded + d.attendance.notRecorded).toBeGreaterThanOrEqual(d.headcount.total);
+    // Everyone is either recorded, not in yet, or off today (weekly off or holiday).
+    expect(d.attendance.recorded + d.attendance.notRecorded + d.attendance.offToday).toBe(d.headcount.total);
     expect(d.today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     for (const h of d.holidays) expect(h.date >= d.today).toBe(true);
   });

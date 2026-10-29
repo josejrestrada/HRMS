@@ -51,7 +51,7 @@ const nav = [
   },
   {
     label: "Attendance",
-    soon: true,
+    href: "/app/attendance",
     svg: (
       <svg {...icon}>
         <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />

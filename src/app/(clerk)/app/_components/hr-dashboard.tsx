@@ -122,7 +122,9 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
   const { headcount, onLeave, onLeaveTotal, pending, attendance, holidays, recentJoiners, attention, byDepartment } = data;
   const total = headcount.total;
   const working = (attendance.counts.present ?? 0) + (attendance.counts.wfh ?? 0) + (attendance.counts.half_day ?? 0);
-  const presentPct = attendance.recorded > 0 && total > 0 ? Math.round((working / total) * 100) : null;
+  const expected = Math.max(total - attendance.offToday, 0);
+  const allOff = total > 0 && expected === 0;
+  const presentPct = attendance.recorded > 0 && expected > 0 ? Math.round((working / expected) * 100) : null;
   const flagged =
     (attention.withoutManager > 0 ? 1 : 0) +
     (attention.notSignedIn > 0 ? 1 : 0) +
@@ -170,9 +172,11 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
           label="Working today"
           value={presentPct === null ? "–" : `${presentPct}%`}
           sub={
-            presentPct === null
-              ? "Attendance not recorded yet"
-              : `${working} of ${total} present, remote or half day`
+            allOff
+              ? "Weekly off or holiday"
+              : presentPct === null
+                ? "Nobody has checked in yet"
+                : `${working} of ${expected} present, remote or half day`
           }
         />
         <Kpi
@@ -251,9 +255,11 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
           <section className="panel" aria-labelledby="p-attendance">
             <div className="panel-head">
               <h2 id="p-attendance">Attendance today</h2>
-              <span className="muted">{attendance.recorded} of {total} recorded</span>
+              <span className="muted">{allOff ? "Weekly off or holiday" : `${attendance.recorded} of ${expected} recorded`}</span>
             </div>
-            {attendance.recorded === 0 ? (
+            {allOff ? (
+              <p className="empty">Today is a weekly off or a holiday for everyone, so no attendance is expected.</p>
+            ) : attendance.recorded === 0 && attendance.notRecorded === 0 ? (
               <p className="empty">No attendance has been recorded for today yet.</p>
             ) : (
               <>
@@ -269,7 +275,7 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
                     ) : null;
                   })}
                   {attendance.notRecorded > 0 ? (
-                    <span className="stack-seg stack-none" style={{ flexGrow: attendance.notRecorded }} title={`Not recorded: ${attendance.notRecorded}`} />
+                    <span className="stack-seg stack-none" style={{ flexGrow: attendance.notRecorded }} title={`Not checked in: ${attendance.notRecorded}`} />
                   ) : null}
                 </div>
                 <ul className="legend">
@@ -283,7 +289,7 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
                   {attendance.notRecorded > 0 ? (
                     <li>
                       <span className="swatch swatch-none" aria-hidden="true" />
-                      <span>Not recorded</span>
+                      <span>Not checked in yet</span>
                       <strong>{attendance.notRecorded}</strong>
                     </li>
                   ) : null}

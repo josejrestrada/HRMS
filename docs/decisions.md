@@ -31,6 +31,21 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## Accepted
 
+## 2026-10-31 - Attendance module, first slice (punches and daily status)
+- **Status:** Accepted (2026-10-31, owner: "start attendance")
+- **In this slice:**
+  - **Punches (migration 005):** `punch` is append-only (update, delete and truncate blocked). Employees check in and out on the web; the server records the time, never the browser. `source` allows `device` and `import` later, for biometric machines at Verna.
+  - **Daily status is worked out when you look, not stored.** It is derived from punches, approved leave, holidays, weekly offs and work from home. `attendance_day` becomes a frozen copy only when HR locks a month (next slice). This avoids two copies drifting apart.
+  - **My attendance** (`/app/attendance`): a check in / check out button, today's status, the month as a calendar with a status for each day, a summary, late marks counted against the monthly limit, and the days that need fixing.
+  - **Team today** (`/app/attendance/team`, HR): every active employee's status for a chosen date.
+  - **HR dashboard** attendance panel now shows live numbers instead of the seeded test rows.
+- **Day rules (R27, in `src/modules/attendance/rules.ts`, pure and tested):** a weekly off or holiday wins; full-day leave shows as leave; half-day leave shows as a half day; approved work from home counts as present; otherwise 8 hours or more is present, 4.5 hours up to 8 is a half day, and less than 4.5 hours is absent. A check-in with no check-out on a past day is a **missed punch** (to be fixed in the next slice, R28). Today with only a check-in is provisionally present. Leave beats punches if both exist (P9).
+- **Policy values are assumptions the owner must confirm:** work starts 09:30, grace 15 minutes (R26), full day 8 hours, half day 4.5 hours, 3 late marks per deduction, regularization allowed until the 5th of the next month (R28). They live in `attendance_policy`, one row per location, so changing them needs no code change.
+- **Late marks are counted and shown, but no half-day deduction is applied.** R26 deducts leave automatically; the review (P8) flagged this may need legal review before it is enforced. It also needs the regularization step, because fixing a missed punch removes a late mark.
+- **Not supported yet:** shifts, night shifts that cross midnight and per-shift hours (P1 is still Proposed). Everyone follows one day pattern per location; a punch belongs to the IST date it happened on. Verna uses the same defaults as Panaji until P1 is decided.
+- **Cross-module access:** attendance reads people, locations, holidays and leave only through exported functions in the employees and leave modules, which check who is asking. Only HR can read everyone; anyone else can read only themself.
+- **Next slices (not built):** regularization (single and bulk, with manager approval), work-from-home requests and approval, month lock with the frozen copy, the late-mark deduction (after legal review), device import, and a monthly attendance report.
+
 ## 2026-10-30 - Year-end leave processing (R22 to R25)
 - **Status:** Accepted (2026-10-30, owner: "go ahead"). This closes the "must ship before 31 Dec 2026" item from the Leave decision.
 - **What it does (HR admin, once a year):** for every active employee and each balance leave type (CL, SL, EL) it looks at the **available** balance (balance minus days held by pending requests). Up to the type's carry-forward cap (CL 0, SL 0, EL 45) is carried forward; anything above the cap is **encashed** if the type is encashable (EL) and otherwise **lapses** (CL and SL, which have a cap of 0, so they lapse in full).

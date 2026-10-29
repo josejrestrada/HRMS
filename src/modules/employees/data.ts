@@ -1,7 +1,7 @@
 import "server-only";
 import { query, transaction, type Queryable } from "@/shared/db";
 import { recordAudit } from "@/shared/audit";
-import { requireRole, type Actor, type Role } from "@/shared/roles";
+import { ForbiddenError, requireRole, type Actor, type Role } from "@/shared/roles";
 import { DomainError } from "@/shared/errors";
 import { formatDate, todayIST } from "@/shared/dates";
 import type { ChangeAssignmentInput, DeactivateInput, ListFilter, NewEmployeeInput } from "./schemas";
@@ -510,4 +510,60 @@ export async function reactivateEmployeeTx(tx: Queryable, actor: Actor | null, e
 export async function reactivateEmployee(actor: Actor | null, employeeId: string) {
   requireRole(actor, "hr_admin");
   return transaction((tx) => reactivateEmployeeTx(tx, actor, employeeId));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Workforce facts for other modules (attendance). HR can ask about everyone; anyone else can only
+// ask about themself.
+// ---------------------------------------------------------------------------------------------
+
+export type WorkforceRow = {
+  id: string;
+  code: string;
+  fullName: string;
+  department: string | null;
+  locationId: string | null;
+  locationName: string | null;
+  weeklyOffDays: number[];
+};
+
+/** Active employees with the location and department effective on `date`. `null` ids means everyone (HR only). */
+export async function getWorkforce(
+  actor: Actor | null,
+  employeeIds: string[] | null,
+  date: string,
+  q: Queryable = { query },
+): Promise<WorkforceRow[]> {
+  requireRole(actor, "employee");
+  if (employeeIds === null) requireRole(actor, "hr_admin");
+  else if (!actor.roles.includes("hr_admin") && employeeIds.some((id) => id !== actor.employeeId)) {
+    throw new ForbiddenError();
+  }
+  const rows = await q.query<{
+    id: string;
+    employee_code: string;
+    full_name: string;
+    department: string | null;
+    location_id: string | null;
+    location_name: string | null;
+    weekly_off_days: number[] | null;
+  }>(
+    `select e.id, e.employee_code, e.full_name, a.department, l.id as location_id, l.name as location_name, l.weekly_off_days
+       from employee e
+       left join employment_assignment a on a.employee_id = e.id
+        and a.effective_from <= $2::date and (a.effective_to is null or a.effective_to >= $2::date)
+       left join location l on l.id = a.location_id
+      where e.status = 'active' and ($1::uuid[] is null or e.id = any($1::uuid[]))
+      order by e.full_name, e.employee_code`,
+    [employeeIds, date],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    code: r.employee_code,
+    fullName: r.full_name,
+    department: r.department,
+    locationId: r.location_id,
+    locationName: r.location_name,
+    weeklyOffDays: r.weekly_off_days ?? [0, 6],
+  }));
 }

@@ -814,3 +814,44 @@ export async function runYearEnd(actor: Actor | null, opts: { year: number }) {
   requireRole(actor, "hr_admin");
   return transaction((tx) => runYearEndTx(tx, actor, opts));
 }
+
+// ---------------------------------------------------------------------------------------------
+// Calendar facts for other modules (attendance): approved leave and holidays.
+// ---------------------------------------------------------------------------------------------
+
+export type CalendarFacts = {
+  leave: { employeeId: string; start: string; end: string; part: DayPart }[];
+  holidays: { locationId: string; date: string; name: string }[];
+};
+
+/** Approved leave and national/state holidays between two dates. `null` ids means everyone (HR only). */
+export async function getCalendarFacts(
+  actor: Actor | null,
+  opts: { employeeIds: string[] | null; locationIds: string[]; from: string; to: string },
+  q: Queryable = { query },
+): Promise<CalendarFacts> {
+  requireEmployee(actor);
+  if (opts.employeeIds === null) requireRole(actor, "hr_admin");
+  else if (!isHr(actor) && opts.employeeIds.some((id) => id !== actor.employeeId)) throw new ForbiddenError();
+
+  const [leave, holidays] = await Promise.all([
+    q.query<{ employee_id: string; start_date: string; end_date: string; day_part: DayPart }>(
+      `select employee_id, start_date::text, end_date::text, day_part
+         from leave_request
+        where status = 'approved' and ($1::uuid[] is null or employee_id = any($1::uuid[]))
+          and start_date <= $3::date and end_date >= $2::date`,
+      [opts.employeeIds, opts.from, opts.to],
+    ),
+    opts.locationIds.length === 0
+      ? Promise.resolve([] as { location_id: string; d: string; name: string }[])
+      : q.query<{ location_id: string; d: string; name: string }>(
+          `select location_id, holiday_date::text as d, name from holiday
+            where location_id = any($1::uuid[]) and type in ('national', 'state') and holiday_date between $2::date and $3::date`,
+          [opts.locationIds, opts.from, opts.to],
+        ),
+  ]);
+  return {
+    leave: leave.map((r) => ({ employeeId: r.employee_id, start: r.start_date, end: r.end_date, part: r.day_part })),
+    holidays: holidays.map((r) => ({ locationId: r.location_id, date: r.d, name: r.name })),
+  };
+}

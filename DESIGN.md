@@ -107,6 +107,10 @@ Year calendar and list for the employee's own location, colour and label by type
 ### 4.6 Attendance: my month
 Calendar grid. Each day shows a status icon and short label (Present, Half day, Absent, Leave, Holiday, Weekly off, WFH), with first-in and last-out on hover or tap. Days that need action have an amber marker: late, missed punch, absent without leave. A summary row shows days present, leave, LOP and late marks. Late marks show the running count toward the deduction rule ("2 of 3 late marks this month", R26).
 
+### 4.6a What is built in the first Attendance slice
+- **My attendance** (`/app/attendance`): a large **Check in** / **Check out** button that switches after each press, with today's first-in time and status; a month calendar showing each day's status with an icon and text label; a summary row (present, half days, leave, work from home, absent) and **late marks as "2 of 3 this month"**; and a **Days to fix** list (missed punches and short days) that points to regularization once it exists.
+- **Team today** (`/app/attendance/team`, HR): pick a date and see each employee's status, first-in, last-out and a late flag, with counts at the top.
+
 ### 4.7 Regularization
 - A list of days needing action, each with a checkbox, the problem ("Missing out-punch"), and proposed times.
 - **Select several days, enter one reason, submit once** (bulk).

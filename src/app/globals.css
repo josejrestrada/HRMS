@@ -1455,3 +1455,154 @@ textarea {
 .yearend-preview .table-wrap {
   margin: 12px 0 16px;
 }
+
+/* attendance */
+.punch-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.punch-card h2 {
+  margin-bottom: 4px;
+  font-size: 1.05rem;
+}
+
+.punch-card .chip {
+  margin-top: 8px;
+}
+
+.punch-btn {
+  min-width: 180px;
+  min-height: 56px;
+  font-size: 1.1rem;
+}
+
+.month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 12px;
+}
+
+.month-nav h2 {
+  font-size: 1.1rem;
+}
+
+.att-summary {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.att-stat {
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.att-stat p {
+  margin: 0;
+}
+
+.att-stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.cal {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.cal-head {
+  padding: 4px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.cal-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 64px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 8px;
+  font-size: 0.68rem;
+  overflow: hidden;
+}
+
+.cal-date {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.cal-status {
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.cal-times,
+.cal-late {
+  color: var(--muted);
+  line-height: 1.1;
+}
+
+.cal-late {
+  color: var(--warning-text);
+  font-weight: 600;
+}
+
+.cal-today {
+  outline: 2px solid var(--primary);
+}
+
+.st-present { border-left-color: var(--series-3); }
+.st-half { border-left-color: var(--series-4); }
+.st-absent { border-left-color: var(--danger); }
+.st-leave { border-left-color: #7b6be0; }
+.st-wfh { border-left-color: var(--series-1); }
+.st-holiday { border-left-color: var(--series-2); }
+.st-off { border-left-color: var(--border); color: var(--muted); }
+.st-upcoming { border-left-color: transparent; }
+
+.st-chip {
+  border-left-width: 4px;
+}
+
+.chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 640px) {
+  .punch-card {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .att-summary {
+    grid-template-columns: repeat(6, 1fr);
+  }
+
+  .cal-cell {
+    min-height: 84px;
+    font-size: 0.78rem;
+  }
+}

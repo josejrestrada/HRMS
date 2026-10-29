@@ -140,6 +140,13 @@ These are my own design choices, informed by the research above. The statutory n
 - **R40.** Year-end runs for active employees only. Settling a leaver's balance (R8, R15) is a separate feature.
 - **R41.** The year-end run is idempotent per employee, leave type and year. If a balance changes after the run, a second run does not change it again; HR corrects it with an adjustment entry.
 
+### Clarifications from building Attendance (see docs/decisions.md)
+- **R42.** Daily attendance is worked out from punches, approved leave, holidays, weekly offs and work from home when it is viewed. It is frozen into a stored copy only when HR locks the month.
+- **R43.** A weekly off or holiday wins over everything else. Full-day leave shows as leave and beats any punches. Half-day leave shows as a half day.
+- **R44.** A check-in with no check-out on a past day is a missed punch. On the current day it is provisionally present.
+- **R45.** Late marks are counted and shown against the monthly limit of 3. The half-day deduction of R26 is not applied until it has been checked against the law (P8).
+- **R46.** Until shifts exist (P1), every employee follows one working day per location, and a punch belongs to the IST date it happened on, so night shifts are not supported.
+
 ### Still to resolve
 - Which Goa Act applies now (1973 or 2025) and its commencement date, and whether the plant in Verna is also covered by the Factories Act.
 - The official Goa 2026 holiday notification, to replace the tentative list in section 6.

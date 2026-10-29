@@ -2,6 +2,7 @@ import "server-only";
 import { query } from "@/shared/db";
 import { requireRole, type Actor } from "@/shared/roles";
 import { todayIST } from "@/shared/dates";
+import { getDaySummary } from "@/modules/attendance/data";
 
 export type HrDashboard = {
   today: string;
@@ -27,7 +28,7 @@ export type HrDashboard = {
     items: { employeeCode: string; fullName: string; leaveCode: string; startDate: string; endDate: string; days: number; waitingDays: number }[];
   };
   byDepartment: { name: string; count: number }[];
-  attendance: { counts: Record<string, number>; recorded: number; notRecorded: number };
+  attendance: { counts: Record<string, number>; recorded: number; notRecorded: number; offToday: number };
   holidays: { date: string; name: string; type: string; verified: boolean; locations: string[] }[];
   recentJoiners: { employeeCode: string; fullName: string; designation: string; location: string; joiningDate: string }[];
   attention: { withoutManager: number; notSignedIn: number; unassigned: number };
@@ -88,13 +89,7 @@ export async function getHrDashboard(actor: Actor | null): Promise<HrDashboard> 
           where lr.status = 'pending' and e.status = 'active'`,
         [today],
       ),
-      query<{ status: string; count: number }>(
-        `select ad.status, count(*)::int as count
-           from attendance_day ad join employee e on e.id = ad.employee_id
-          where ad.work_date = $1::date and e.status = 'active'
-          group by ad.status`,
-        [today],
-      ),
+      getDaySummary(actor, today),
       query<{ count: number }>(`select count(*)::int as count from employee where status = 'active'`),
       query<{ holiday_date: string; name: string; type: string; verified: boolean; locations: string[] }>(
         `select h.holiday_date::text, h.name, h.type, bool_and(h.verified) as verified,
@@ -139,9 +134,6 @@ export async function getHrDashboard(actor: Actor | null): Promise<HrDashboard> 
       ),
     ]);
 
-  const counts: Record<string, number> = {};
-  for (const row of attendance) counts[row.status] = row.count;
-  const recorded = attendance.reduce((sum, row) => sum + row.count, 0);
   const total = activeTotal[0]?.count ?? 0;
   const assigned = byLocation.reduce((sum, r) => sum + r.count, 0);
 
@@ -175,7 +167,7 @@ export async function getHrDashboard(actor: Actor | null): Promise<HrDashboard> 
       })),
     },
     byDepartment: byDepartment.map((r) => ({ name: r.name, count: r.count })),
-    attendance: { counts, recorded, notRecorded: Math.max(total - recorded, 0) },
+    attendance: { counts: attendance.counts, recorded: attendance.recorded, notRecorded: attendance.notRecorded, offToday: attendance.offToday },
     holidays: holidays.map((r) => ({
       date: r.holiday_date,
       name: r.name,
