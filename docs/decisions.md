@@ -365,3 +365,17 @@ can request it. The rest below is a **default I chose so the flow can be built; 
 - **Effect:** an approved day shows as work from home and counts as present, even with no punches (R27). A locked month is never changed:
   requests, decisions and cancellations for days in a locked month are refused (R65), and the frozen copy already stores the day.
 - **Not in this slice:** emails, WFH on the HR assistant, HR filing on someone's behalf, a team calendar bar for WFH.
+
+## 2026-10-30: Employee home screen
+
+Follows DESIGN.md section 4.1 (greeting and today's status, balance cards, upcoming, primary actions, attention banner).
+
+- **Where it lives:** `/app` shows the home screen to every employee who is not HR. HR keep the dashboard at `/app`, and get the same
+  personal screen at `/app/me` ("My home" in the navigation), because HR staff are employees too and have their own leave and attendance.
+- **Today's status:** checked in at (time), working from home, on leave, holiday, weekly off, or not checked in yet. A **Check in / Check out**
+  button on the home screen uses the same server action as the attendance page (the time is always the server's).
+- **Balances:** every leave type the person has, except leave without pay, with available days (balance minus held days) and a link to the statement.
+- **Upcoming:** the next holidays for the person's location, approved or pending leave, and approved or pending work from home, soonest first, at most 8 items.
+- **Attention:** days that need fixing with the date the window closes (also the previous month while its window is still open),
+  days that can no longer be fixed and count as unpaid, and (for managers and HR) requests waiting for them.
+- **Not in this slice:** team calendar, birthdays and anniversaries, announcements, and any HR numbers. The screen shows only the signed-in person's own data.

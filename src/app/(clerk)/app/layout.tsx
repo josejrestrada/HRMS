@@ -29,6 +29,18 @@ const nav = [
     ),
   },
   {
+    label: "My home",
+    href: "/app/me",
+    hrOnly: true,
+    svg: (
+      <svg {...icon}>
+        <path d="M3.5 11 12 4l8.5 7" />
+        <path d="M5.5 10v9.5h13V10" />
+        <path d="M10 19.5v-5h4v5" />
+      </svg>
+    ),
+  },
+  {
     label: "People",
     href: "/app/people",
     svg: (
@@ -105,7 +117,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <nav className="app-nav" aria-label="Main">
             <ul>
               {nav
-                .filter((item) => item.label !== "People" || actor.roles.includes("hr_admin"))
+                .filter((item) => (item.label !== "People" && !("hrOnly" in item)) || actor.roles.includes("hr_admin"))
                 .map((item) => (
                 <li key={item.label}>
                   {item.href ? (

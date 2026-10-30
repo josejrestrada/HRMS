@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentActor } from "@/shared/auth";
-import { getHrDashboard } from "@/modules/reports/data";
+import { getEmployeeHome, getHrDashboard } from "@/modules/reports/data";
+import { EmployeeHomeView } from "./_components/employee-home";
 import { HrDashboardView } from "./_components/hr-dashboard";
 
 // The proxy is only an early redirect. The real checks are here: signed in, linked to an
@@ -31,12 +31,5 @@ export default async function AppHomePage() {
     return <HrDashboardView data={data} userName={actor.fullName} />;
   }
 
-  return (
-    <div className="notice-card">
-      <h1>Welcome, {actor.fullName}</h1>
-      <p>
-        Your dashboard is coming soon. In the meantime you can <Link href="/app/leave">see your leave and apply</Link>.
-      </p>
-    </div>
-  );
+  return <EmployeeHomeView data={await getEmployeeHome(actor)} userName={actor.fullName} />;
 }

@@ -2,7 +2,10 @@ import "server-only";
 import { query } from "@/shared/db";
 import { requireRole, type Actor } from "@/shared/roles";
 import { todayIST } from "@/shared/dates";
-import { getDaySummary } from "@/modules/attendance/data";
+import { getAttendanceApprovalScope, getDaySummary, getMyAttendance, getMyWfh } from "@/modules/attendance/data";
+import { getApplyContext, getApprovalScope, getLeaveOverview } from "@/modules/leave/data";
+import { addMonths } from "@/shared/dates";
+import { buildHome, type EmployeeHome } from "./home";
 
 export type HrDashboard = {
   today: string;
@@ -188,4 +191,44 @@ export async function getHrDashboard(actor: Actor | null): Promise<HrDashboard> 
       unassigned: Math.max(total - assigned, 0),
     },
   };
+}
+
+/** The signed-in person's own home screen: today's status, balances, what is coming up and what needs attention. */
+export async function getEmployeeHome(actor: Actor | null): Promise<EmployeeHome> {
+  requireRole(actor, "employee");
+  const today = todayIST();
+  const year = Number(today.slice(0, 4));
+  const month = Number(today.slice(5, 7));
+
+  const [attendance, overview, context, wfh, leaveScope, attendanceScope] = await Promise.all([
+    getMyAttendance(actor, year, month),
+    getLeaveOverview(actor),
+    getApplyContext(actor),
+    getMyWfh(actor),
+    getApprovalScope(actor),
+    getAttendanceApprovalScope(actor),
+  ]);
+
+  // While last month's fix window is still open (until the policy day), its days need attention too.
+  const previous = addMonths(`${today.slice(0, 7)}-01`, -1);
+  const stillOpen = Number(today.slice(8, 10)) <= attendance.policy.regularizeUntilDay;
+  const before = stillOpen ? await getMyAttendance(actor, Number(previous.slice(0, 4)), Number(previous.slice(5, 7))) : null;
+  const fixable = [...(before && !before.locked ? before.fixable : []), ...attendance.fixable];
+
+  return buildHome({
+    today,
+    day: attendance.days.find((d) => d.date === today) ?? null,
+    todayIn: attendance.todayIn,
+    todayOut: attendance.todayOut,
+    canPunch: attendance.canPunch,
+    next: attendance.next,
+    regularizeUntilDay: attendance.policy.regularizeUntilDay,
+    fixableDates: fixable.map((f) => f.date),
+    pastDeadlineCount: attendance.pastDeadline.length,
+    balances: overview.balances.filter((b) => b.code !== "LOP").map((b) => ({ code: b.code, name: b.name, available: b.available, held: b.held })),
+    holidays: context?.holidays ?? {},
+    leave: overview.requests,
+    wfh: wfh.requests,
+    waitingForMe: { leave: leaveScope.pending, attendance: attendanceScope.pending },
+  });
 }
