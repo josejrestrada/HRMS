@@ -31,6 +31,28 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## Accepted
 
+## 2026-11-01 - HR assistant agent (chatbot), first slice
+- **Status:** Accepted (2026-11-01, owner: "start with the HR assistant agent, like a chatbot").
+- **What it is:** a chat page (`/app/assistant`) for every signed-in employee. It answers questions about their own leave, attendance, holidays and the company's leave and attendance rules, and can **prepare** a leave application for the employee to confirm. HR admins and managers also get a few summary answers (headcount and attendance counts, how many approvals are waiting).
+- **How it works (ARCHITECTURE section 8):** the app server talks to the language model; the model never touches the database. It can only call a fixed list of **tools**, each a thin wrapper over an existing module function, run with the signed-in user's own permissions.
+  - **Who is asking** always comes from the session. No tool accepts an employee id, and extra arguments are rejected, so a prompt cannot ask for someone else's data.
+  - **Tools (v1):** my leave balances; my leave requests; my attendance this month (counts, late marks, days to fix); upcoming holidays for my location; explain a policy topic; prepare a leave application; and, for managers and HR, approvals waiting and (HR only) today's headcount and attendance counts.
+  - **Counts, not names:** HR summary tools return numbers only. Names, medical or other personal details of other people are never sent to the model.
+  - **Never available to the model:** Aadhaar, PAN, bank details, salary, other employees' records, roles, or anything that changes data directly.
+- **The model cannot submit anything.** "Prepare a leave application" creates a **draft** that is shown to the employee with the day count, balance after and any warnings, and a **Confirm** button. Confirming runs the normal leave application with all its normal checks. A draft belongs to one person, expires after 30 minutes and can be used once.
+- **Provider:** Gemini or Groq, chosen by `AGENT_PROVIDER` or by whichever key exists (`GEMINI_API_KEY`, `GROQ_API_KEY`), behind one small interface so either can be swapped by configuration. The model name is configurable (`AGENT_MODEL`); the built-in defaults were **not tested against the live services** because no key has been set. Without a key the page says the assistant is not set up.
+- **Safety rules:** user text and tool results are treated as data, never as instructions; at most 4 tool rounds per message; messages over 600 characters are refused; each person is limited to 20 messages an hour and 100 a day; replies are length-capped; if the provider fails the person gets a plain apology and nothing else happens; the assistant says when it does not know and points to HR; it refuses legal or medical advice.
+- **Privacy (DPDP):** questions and tool results are sent to the model provider. The page tells people not to type ID numbers, bank details or medical details. **Owner to decide and confirm before real use:** which provider and which plan, because free tiers of some providers may use inputs to improve their models, and the provider's data-handling terms and where it processes data.
+- **Stored data:** conversations and messages are stored per employee, visible only to that employee, append-only (the app role cannot edit or delete them). "Clear chat" archives a conversation. **Retention target is 90 days, but nothing purges old chats yet** (the app role has no delete right by design); a purge job run with a separate privileged role is a later step.
+- **Audit:** every tool call writes an audit entry with the tool name, and the messages record which tool produced each result.
+- **Not in this slice:** streaming replies, voice, other languages (English only), actions other than preparing a leave application, a retrieval index over policy documents (policy text is built in from the rules in the code), a live test against the real providers, and the 90-day purge.
+- **Tests:** a scripted fake provider drives the whole loop in tests (tool use, unknown tools, extra arguments, rate limits, drafts, other people's drafts, provider failure); a database test checks that conversations and drafts are scoped to their owner.
+
+## Planned next (owner's order, 2026-11-01)
+1. **Work-from-home request flow** (attendance already counts approved WFH as present, but employees cannot ask for it yet). **Remind the owner after the assistant is done.**
+2. **Employee home screen** (non-HR employees currently see a placeholder at `/app`).
+3. Also open: review finding 4 (half-day leave), the go-live import, the production Neon project and restricted login, and the policy-value confirmations.
+
 ## 2026-10-31 - Review fixes: app-role privileges, impossible dates, and a guard for database tests
 - **Status:** Accepted (2026-10-31, owner: "fix 9, 10, 11" of the review).
 - **Finding 9, privileges (migration 011):**

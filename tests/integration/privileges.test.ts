@@ -8,7 +8,7 @@ import { databaseTestsEnabled } from "./enabled";
 const enabled = databaseTestsEnabled();
 
 // Tables whose rows may only ever be added (see migrations 001, 004, 005, 008).
-const APPEND_ONLY = ["audit_log", "leave_ledger", "punch", "attendance_period"];
+const APPEND_ONLY = ["audit_log", "leave_ledger", "punch", "attendance_period", "agent_message"];
 // The one table the application may delete from: role assignments are removed when someone loses a role.
 const MAY_DELETE = ["employee_role"];
 
@@ -30,7 +30,7 @@ describe.skipIf(!enabled)("application role privileges (hrms_app)", () => {
     (await pool.query("select has_table_privilege('hrms_app', $1, $2) as ok", [`public.${table}`, privilege])).rows[0].ok as boolean;
 
   it("knows about the tables it is checking", () => {
-    expect(tables).toEqual(expect.arrayContaining(["employee", "leave_ledger", "punch", "regularization", "compoff_request", "attendance_period", "attendance_day", "attendance_policy"]));
+    expect(tables).toEqual(expect.arrayContaining(["employee", "leave_ledger", "punch", "regularization", "compoff_request", "attendance_period", "attendance_day", "attendance_policy", "agent_conversation", "agent_message", "agent_draft"]));
   });
 
   it("can read every application table, and cannot touch the migration record", async () => {
@@ -61,7 +61,7 @@ describe.skipIf(!enabled)("application role privileges (hrms_app)", () => {
   });
 
   it("refuses to truncate the newer protected tables even for the owner (defence in depth)", async () => {
-    for (const t of ["regularization", "compoff_request", "attendance_day", "punch", "leave_ledger", "attendance_period", "audit_log", "employee"]) {
+    for (const t of ["regularization", "compoff_request", "attendance_day", "punch", "leave_ledger", "attendance_period", "audit_log", "employee", "agent_conversation", "agent_message", "agent_draft"]) {
       const c = await pool.connect();
       try {
         await c.query("begin");
