@@ -14,6 +14,7 @@ import {
   elAccrualForMonth,
   entitlementMonths,
   fmtDays,
+  isSameDelivery,
   proratedGrant,
   workingDaysInMonth,
   yearEndPlan,
@@ -331,5 +332,20 @@ describe("comp-off credits (R51)", () => {
   it("returns null when the usable credits are not enough", () => {
     expect(allocateCompoff(credits, 2, "2026-11-30")).toBeNull();
     expect(allocateCompoff([], 0.5, "2026-11-05")).toBeNull();
+  });
+});
+
+describe("isSameDelivery (R67)", () => {
+  it("treats expected delivery dates less than 180 days apart as one delivery", () => {
+    expect(isSameDelivery("2027-01-10", "2027-01-10")).toBe(true);
+    expect(isSameDelivery("2027-01-10", "2027-03-01")).toBe(true);
+    expect(isSameDelivery("2027-01-10", "2026-08-15")).toBe(true); // either way round
+    expect(isSameDelivery("2027-01-10", "2027-07-08")).toBe(true); // 179 days
+  });
+
+  it("treats dates 180 days or more apart as different deliveries", () => {
+    expect(isSameDelivery("2027-01-10", "2027-07-09")).toBe(false); // exactly 180 days
+    expect(isSameDelivery("2027-01-10", "2027-07-10")).toBe(false);
+    expect(isSameDelivery("2027-01-10", "2028-04-01")).toBe(false);
   });
 });

@@ -254,9 +254,10 @@ export async function getEmployeeProfile(actor: Actor | null, employeeId: string
     query<{ id: string; employee_code: string; full_name: string; designation: string }>(
       `select e.id, e.employee_code, e.full_name, a.designation
          from employment_assignment a join employee e on e.id = a.employee_id
-        where a.manager_id = $1 and a.effective_to is null and e.status = 'active'
+        where a.manager_id = $1 and a.effective_from <= $2::date and (a.effective_to is null or a.effective_to >= $2::date)
+          and e.status = 'active'
         order by e.full_name`,
-      [employeeId],
+      [employeeId, today],
     ),
   ]);
   const e = emp[0];
@@ -596,17 +597,21 @@ export async function getDirectReportIds(actor: Actor | null, q: Queryable = { q
   requireRole(actor, "employee");
   const rows = await q.query<{ id: string }>(
     `select e.id from employment_assignment a join employee e on e.id = a.employee_id
-      where a.manager_id = $1 and a.effective_to is null and e.status = 'active'`,
-    [actor.employeeId],
+      where a.manager_id = $1 and a.effective_from <= $2::date and (a.effective_to is null or a.effective_to >= $2::date)
+        and e.status = 'active'`,
+    [actor.employeeId, todayIST()],
   );
   return rows.map((r) => r.id);
 }
 
 /** True if `managerId` is the current manager of `employeeId`. */
 export async function isCurrentManagerOf(q: Queryable, managerId: string, employeeId: string): Promise<boolean> {
+  // R68: the manager on the assignment effective today, not one entered ahead of time.
   const rows = await q.query(
-    "select 1 from employment_assignment where employee_id = $1 and manager_id = $2 and effective_to is null",
-    [employeeId, managerId],
+    `select 1 from employment_assignment
+      where employee_id = $1 and manager_id = $2
+        and effective_from <= $3::date and (effective_to is null or effective_to >= $3::date)`,
+    [employeeId, managerId, todayIST()],
   );
   return rows.length > 0;
 }

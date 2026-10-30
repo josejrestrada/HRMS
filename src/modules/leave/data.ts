@@ -18,6 +18,7 @@ import {
   checkMaternity,
   checkPaternity,
   compoffAvailable,
+  isSameDelivery,
   countLeaveDays,
   elAccrualForMonth,
   fmtDays,
@@ -458,9 +459,12 @@ async function lockRequest(tx: Queryable, requestId: string): Promise<LockedRequ
 }
 
 async function isManagerOf(tx: Queryable, managerId: string, employeeId: string): Promise<boolean> {
+  // R68: the manager on the assignment effective today, not one entered ahead of time.
   const rows = await tx.query(
-    "select 1 from employment_assignment where employee_id = $1 and manager_id = $2 and effective_to is null",
-    [employeeId, managerId],
+    `select 1 from employment_assignment
+      where employee_id = $1 and manager_id = $2
+        and effective_from <= $3::date and (effective_to is null or effective_to >= $3::date)`,
+    [employeeId, managerId, todayIST()],
   );
   return rows.length > 0;
 }
@@ -478,6 +482,11 @@ export async function decideLeaveTx(tx: Queryable, actor: Actor | null, input: D
   });
   if (!allowed) throw new ForbiddenError("You cannot decide this request.");
   if (input.decision === "approve") await assertNotInLockedMonth(tx, req.start_date, req.end_date);
+
+  if (req.type_code === "COMPOFF") {
+    // R66: one comp-off decision per employee at a time, so two approvals cannot use the same credit.
+    await tx.query("select 1 from employee where id = $1 for update", [req.employee_id]);
+  }
 
   const held = req.held;
   const year = Number(req.start_date.slice(0, 4));
@@ -556,6 +565,7 @@ export async function cancelLeaveTx(tx: Queryable, actor: Actor | null, requestI
       [req.employee_id, req.leave_type_id, year, today, held, req.id],
     );
   } else if (held > 0 && req.type_code === "COMPOFF") {
+    await tx.query("select 1 from employee where id = $1 for update", [req.employee_id]); // R66
     // Give the days back only to comp-off credits that have not expired (R53).
     const used = await tx.query<{ cid: string; amount: number; expires_on: string }>(
       `select l.consumes_entry_id::text as cid, (-sum(l.delta))::float8 as amount, c.expires_on::text as expires_on
@@ -630,7 +640,7 @@ export async function listApprovals(actor: Actor | null): Promise<ApprovalRow[]>
       where lr.status = 'pending' and e.status = 'active' and e.id <> $1
         and ($3::boolean or exists (
               select 1 from employment_assignment a
-               where a.employee_id = e.id and a.manager_id = $1 and a.effective_to is null))
+               where a.employee_id = e.id and a.manager_id = $1 and a.effective_from <= $2::date and (a.effective_to is null or a.effective_to >= $2::date)))
       order by lr.created_at
       limit 100`,
     [actor.employeeId, today, isHr(actor)],
@@ -658,8 +668,9 @@ export async function getApprovalScope(actor: Actor | null): Promise<{ canApprov
   requireEmployee(actor);
   const reports = await query<{ n: number }>(
     `select count(*)::int as n from employment_assignment a join employee e on e.id = a.employee_id
-      where a.manager_id = $1 and a.effective_to is null and e.status = 'active'`,
-    [actor.employeeId],
+      where a.manager_id = $1 and a.effective_from <= $2::date and (a.effective_to is null or a.effective_to >= $2::date)
+        and e.status = 'active'`,
+    [actor.employeeId, todayIST()],
   );
   const canApprove = isHr(actor) || reports[0].n > 0;
   if (!canApprove) return { canApprove, pending: 0 };
@@ -686,7 +697,10 @@ export async function runLeaveCreditsTx(tx: Queryable, actor: Actor | null, opts
          from leave_type where active and annual_quota is not null and accrual_mode in ('upfront', 'monthly')`,
     ),
     tx.query<{ id: string; joining_date: string }>("select id, joining_date::text from employee where status = 'active'"),
-    tx.query<{ employee_id: string; location_id: string }>("select employee_id, location_id from employment_assignment where effective_to is null"),
+    tx.query<{ employee_id: string; location_id: string }>(
+      "select employee_id, location_id from employment_assignment where effective_from <= $1::date and (effective_to is null or effective_to >= $1::date)",
+      [today],
+    ),
     tx.query<{ id: string; weekly_off_days: number[] }>("select id, weekly_off_days from location"),
     tx.query<{ location_id: string; d: string; name: string }>(
       `select location_id, holiday_date::text as d, name from holiday
@@ -1051,6 +1065,22 @@ export async function applyMaternityTx(tx: Queryable, actor: Actor | null, input
     gender: emp.gender,
   });
   if (!check.ok) throw new DomainError(check.error, check.field || undefined);
+
+  // R67: maternity leave is once for each delivery, not once for each request.
+  const earlier = await tx.query<{ edd: string }>(
+    `select lr.expected_delivery_date::text as edd
+       from leave_request lr join leave_type t on t.id = lr.leave_type_id
+      where t.code = 'MAT' and lr.employee_id = $1 and lr.status in ('pending', 'approved') and lr.expected_delivery_date is not null`,
+    [actor.employeeId],
+  );
+  const same = earlier.find((e) => isSameDelivery(e.edd, input.expectedDeliveryDate));
+  if (same) {
+    throw new DomainError(
+      `You already have maternity leave for a delivery expected around ${formatDate(same.edd)}. Maternity leave is once for each delivery. If this is a different delivery, please contact HR.`,
+      "expectedDeliveryDate",
+    );
+  }
+
   await assertNotInLockedMonth(tx, input.startDate, check.endDate, "startDate");
   await assertNoOverlap(tx, actor.employeeId, input.startDate, check.endDate);
 
@@ -1320,7 +1350,7 @@ export async function listCompoffApprovals(actor: Actor | null): Promise<Compoff
       where cr.status = 'pending' and e.status = 'active' and e.id <> $1
         and ($3::boolean or exists (
               select 1 from employment_assignment a
-               where a.employee_id = e.id and a.manager_id = $1 and a.effective_to is null))
+               where a.employee_id = e.id and a.manager_id = $1 and a.effective_from <= $2::date and (a.effective_to is null or a.effective_to >= $2::date)))
       order by cr.created_at limit 100`,
     [actor.employeeId, today, isHr(actor)],
   );

@@ -214,6 +214,8 @@ export function yearEndPlan(i: { available: number; cap: number; encashable: boo
 
 export const MATERNITY_PRE_DELIVERY_DAYS = 56; // 8 weeks
 export const MATERNITY_MIN_TENURE_DAYS = 80;
+/** R67: two expected delivery dates closer than this are the same delivery. */
+export const MATERNITY_SAME_DELIVERY_DAYS = 180;
 export const PATERNITY_DAYS = 5;
 export const PATERNITY_MONTHS = 3;
 export const COMPOFF_EXPIRY_DAYS = 60;
@@ -257,6 +259,11 @@ export function checkMaternity(i: {
   const weeks = maternityWeeks(i.survivingChildren);
   const days = weeks * 7;
   return { ok: true, weeks, endDate: addDays(i.startDate, days - 1), days, tenureDays };
+}
+
+/** R67: is this the same delivery as another request? (Within 180 days, either way round.) */
+export function isSameDelivery(expectedA: string, expectedB: string): boolean {
+  return Math.abs(daysBetweenDates(expectedA, expectedB)) < MATERNITY_SAME_DELIVERY_DAYS;
 }
 
 function daysBetweenDates(from: string, to: string): number {

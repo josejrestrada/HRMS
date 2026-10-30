@@ -176,6 +176,11 @@ These are my own design choices, informed by the research above. The statutory n
 - **R64.** A locked month stores for each day how much of it is unpaid (0 to 1): an absent day is 1, leave without pay is 1 per day, and the converted shortfall of a leave request (R34) is taken from the last days of that request. Payroll reads these amounts. Whether a half day of attendance (R27) costs half a day's pay is still to be decided.
 - **R65.** Locking a month and changing anything in that month (a punch, a fix, a leave decision) cannot happen at the same moment: the lock waits for changes already in progress, and changes wait while a lock is in progress.
 
+### Corrections found in review: comp-off, maternity, managers (see docs/decisions.md)
+- **R66.** Two comp-off approvals for the same person cannot use the same credit: the second waits for the first, and the database refuses any use that would take a credit below zero or above its original amount.
+- **R67.** An employee can have only one open maternity request per delivery. A second request whose expected delivery date is within 180 days of a pending or approved one is refused. HR handles real exceptions. Paternity is limited per birth date, and HR checks the birth date.
+- **R68.** A person's current manager is the manager on the assignment effective today, never one entered ahead of time for a future date.
+
 ### Still to resolve
 - Which Goa Act applies now (1973 or 2025) and its commencement date, and whether the plant in Verna is also covered by the Factories Act.
 - The official Goa 2026 holiday notification, to replace the tentative list in section 6.

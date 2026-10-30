@@ -119,12 +119,18 @@ describe.skipIf(!enabled)("Maternity, paternity and comp-off against the databas
     });
   });
 
-  it("maternity: a second request that overlaps is refused", async () => {
+  it("maternity: a second request for the same delivery is refused, and other leave cannot overlap the maternity dates", async () => {
     await inTx(async (c, tx) => {
       const mum = await person(c, "TESTDB-F", { gender: "female" });
       const edd = addDays(today(), 60);
       await leave.applyMaternityTx(tx, mum, { startDate: addDays(today(), 10), expectedDeliveryDate: edd, survivingChildren: 0 });
-      await expect(leave.applyMaternityTx(tx, mum, { startDate: addDays(today(), 12), expectedDeliveryDate: edd, survivingChildren: 0 })).rejects.toThrow(/overlaps/);
+      // The same delivery cannot be claimed twice (R67), whatever the dates.
+      await expect(leave.applyMaternityTx(tx, mum, { startDate: addDays(today(), 12), expectedDeliveryDate: edd, survivingChildren: 0 })).rejects.toThrow(/once for each delivery/);
+
+      // Other leave during the maternity dates is refused as an overlap (R17).
+      await c.query("insert into leave_ledger (employee_id, leave_type_id, leave_year, entry_date, delta, reason) values ($1, $2, 2026, $3, 5, 'grant')", [mum.employeeId, ids.EL, today()]);
+      const mon = monday(4);
+      await expect(leave.applyLeaveTx(tx, mum, { leaveTypeId: ids.EL, startDate: mon, endDate: mon, dayPart: "full", convertShortfallToLop: false })).rejects.toThrow(/overlaps/);
     });
   });
 
