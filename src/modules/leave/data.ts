@@ -247,6 +247,35 @@ export async function getLeaveOverview(actor: Actor | null): Promise<LeaveOvervi
   };
 }
 
+export type BalanceReportRow = { code: string; fullName: string; department: string | null; available: Record<string, number> };
+
+/** HR: available days (balance minus held) of CL, SL and EL for every active employee. */
+export async function getBalancesReport(actor: Actor | null): Promise<BalanceReportRow[]> {
+  requireRole(actor, "hr_admin");
+  const today = todayIST();
+  const rows = await query<{ code: string; full_name: string; department: string | null; leave_code: string; available: number }>(
+    `select e.employee_code as code, e.full_name, a.department, t.code as leave_code,
+            coalesce(sum(l.delta) filter (where l.reason not in (${HOLDS})), 0)::float8
+              + coalesce(sum(l.delta) filter (where l.reason in (${HOLDS})), 0)::float8 as available
+       from employee e
+       left join employment_assignment a on a.employee_id = e.id
+        and a.effective_from <= $1::date and (a.effective_to is null or a.effective_to >= $1::date)
+       cross join leave_type t
+       left join leave_ledger l on l.leave_type_id = t.id and l.employee_id = e.id
+      where e.status = 'active' and t.active and t.code = any($2::text[])
+      group by e.id, a.department, t.code
+      order by e.full_name, e.employee_code`,
+    [today, BALANCE_TYPES],
+  );
+  const byCode = new Map<string, BalanceReportRow>();
+  for (const r of rows) {
+    const row = byCode.get(r.code) ?? { code: r.code, fullName: r.full_name, department: r.department, available: {} };
+    row.available[r.leave_code] = r.available;
+    byCode.set(r.code, row);
+  }
+  return [...byCode.values()];
+}
+
 export async function getApplyContext(actor: Actor | null): Promise<ApplyContext | null> {
   requireEmployee(actor);
   const today = todayIST();

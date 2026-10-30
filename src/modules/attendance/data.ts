@@ -440,6 +440,48 @@ export async function getDaySheet(actor: Actor | null, date: string, q: Queryabl
   return { date, rows, counts, notCheckedIn, late, notEmployed };
 }
 
+export type MonthSummaryRow = {
+  code: string;
+  fullName: string;
+  department: string | null;
+  location: string | null;
+  present: number;
+  wfh: number;
+  halfDay: number;
+  leave: number;
+  absent: number;
+  weeklyOff: number;
+  holiday: number;
+  lateMarks: number;
+};
+
+/** HR: one month per person, for the attendance summary report. Locked months read the frozen copy. */
+export async function getMonthSummary(actor: Actor | null, year: number, month: number, q: Queryable = { query }): Promise<MonthSummaryRow[]> {
+  requireRole(actor, "hr_admin");
+  if (!Number.isInteger(year) || year < 2000 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12) {
+    throw new DomainError("Choose a valid month.");
+  }
+  const { workforce, days } = await deriveRange(actor, null, monthStart(year, month), monthEnd(year, month), q, { period: true });
+  return workforce.map((w) => {
+    const row: MonthSummaryRow = {
+      code: w.code, fullName: w.fullName, department: w.department, location: w.locationName,
+      present: 0, wfh: 0, halfDay: 0, leave: 0, absent: 0, weeklyOff: 0, holiday: 0, lateMarks: 0,
+    };
+    for (const d of days.get(w.id) ?? []) {
+      if (!d.employed) continue;
+      if (d.late) row.lateMarks += 1;
+      if (d.status === "present") row.present += 1;
+      else if (d.status === "wfh") row.wfh += 1;
+      else if (d.status === "half_day") row.halfDay += 1;
+      else if (d.status === "leave") row.leave += 1;
+      else if (d.status === "absent" || d.status === "missed_punch") row.absent += 1;
+      else if (d.status === "weekly_off") row.weeklyOff += 1;
+      else if (d.status === "holiday") row.holiday += 1;
+    }
+    return row;
+  });
+}
+
 /** HR: the numbers for the dashboard. */
 export async function getDaySummary(actor: Actor | null, date: string): Promise<DaySummary> {
   const sheet = await getDaySheet(actor, date);

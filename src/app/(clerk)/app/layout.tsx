@@ -84,7 +84,8 @@ const nav = [
   },
   {
     label: "Reports",
-    soon: true,
+    href: "/app/reports",
+    hrOnly: true,
     svg: (
       <svg {...icon}>
         <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />

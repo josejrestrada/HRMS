@@ -1,9 +1,12 @@
 import "server-only";
 import { query } from "@/shared/db";
+import { recordAudit } from "@/shared/audit";
+import { DomainError } from "@/shared/errors";
 import { requireRole, type Actor } from "@/shared/roles";
 import { todayIST } from "@/shared/dates";
-import { getAttendanceApprovalScope, getDaySummary, getMyAttendance, getMyWfh } from "@/modules/attendance/data";
-import { getApplyContext, getApprovalScope, getLeaveOverview } from "@/modules/leave/data";
+import { toCsv, type Cell } from "./csv";
+import { getAttendanceApprovalScope, getDaySummary, getMonthSummary, getMyAttendance, getMyWfh } from "@/modules/attendance/data";
+import { getApplyContext, getApprovalScope, getBalancesReport, getLeaveOverview } from "@/modules/leave/data";
 import { addMonths } from "@/shared/dates";
 import { buildHome, type EmployeeHome } from "./home";
 
@@ -231,4 +234,71 @@ export async function getEmployeeHome(actor: Actor | null): Promise<EmployeeHome
     wfh: wfh.requests,
     waitingForMe: { leave: leaveScope.pending, attendance: attendanceScope.pending },
   });
+}
+
+
+// ---------------------------------------------------------------------------------------------
+// Reports (HR only). Each one is a title, a header and rows, so the page and the CSV share one source.
+// ---------------------------------------------------------------------------------------------
+
+export const REPORT_KINDS = ["headcount", "leave-balances", "attendance-summary"] as const;
+export type ReportKind = (typeof REPORT_KINDS)[number];
+
+export type Report = { kind: ReportKind; title: string; subtitle: string; header: string[]; rows: Cell[][]; numericFrom: number };
+
+const TYPE_NAMES: Record<string, string> = { permanent: "Permanent", probation: "Probation", contract: "Contract", intern: "Intern" };
+const num = (n: number) => Math.round(n * 100) / 100;
+
+export async function buildReport(actor: Actor | null, kind: string, opts: { year?: number; month?: number } = {}): Promise<Report> {
+  requireRole(actor, "hr_admin");
+  const today = todayIST();
+
+  if (kind === "headcount") {
+    const rows = await query<{ code: string; full_name: string; department: string | null; location: string; type: string; joined: string }>(
+      `select e.employee_code as code, e.full_name, a.department, l.name as location, a.employment_type as type, e.joining_date::text as joined
+         from ${ACTIVE_NOW}
+        order by e.full_name, e.employee_code`,
+      [today],
+    );
+    return {
+      kind, title: "Headcount", subtitle: `${rows.length} active employees on ${today}`, numericFrom: 99,
+      header: ["Employee code", "Name", "Department", "Location", "Employment type", "Joining date"],
+      rows: rows.map((r) => [r.code, r.full_name, r.department, r.location, TYPE_NAMES[r.type] ?? r.type, r.joined]),
+    };
+  }
+
+  if (kind === "leave-balances") {
+    const rows = await getBalancesReport(actor);
+    return {
+      kind, title: "Leave balances", subtitle: `Available days (balance minus days held for pending requests) on ${today}`, numericFrom: 3,
+      header: ["Employee code", "Name", "Department", "Casual (CL)", "Sick (SL)", "Earned (EL)"],
+      rows: rows.map((r) => [r.code, r.fullName, r.department, num(r.available.CL ?? 0), num(r.available.SL ?? 0), num(r.available.EL ?? 0)]),
+    };
+  }
+
+  if (kind === "attendance-summary") {
+    const year = opts.year ?? Number(today.slice(0, 4));
+    const month = opts.month ?? Number(today.slice(5, 7));
+    const rows = await getMonthSummary(actor, year, month);
+    return {
+      kind, title: "Attendance summary", numericFrom: 4,
+      subtitle: `${new Date(Date.UTC(year, month - 1, 1)).toLocaleString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })}. Missed punches count as absent.`,
+      header: ["Employee code", "Name", "Department", "Location", "Present", "Work from home", "Half day", "On leave", "Absent", "Weekly off", "Holiday", "Late marks"],
+      rows: rows.map((r) => [r.code, r.fullName, r.department, r.location, r.present, r.wfh, r.halfDay, r.leave, r.absent, r.weeklyOff, r.holiday, r.lateMarks]),
+    };
+  }
+
+  throw new DomainError("Choose a report from the list.");
+}
+
+/** Builds the CSV and records who downloaded what. */
+export async function exportReportCsv(actor: Actor | null, kind: string, opts: { year?: number; month?: number } = {}) {
+  const report = await buildReport(actor, kind, opts);
+  await recordAudit({
+    actorEmployeeId: actor!.employeeId,
+    action: "report.download",
+    entity: "report",
+    summary: `${report.title} (${report.rows.length} rows)${kind === "attendance-summary" ? ` ${opts.year}-${String(opts.month).padStart(2, "0")}` : ""}`,
+  });
+  return { filename: `${kind}-${todayIST()}.csv`, csv: toCsv(report.header, report.rows) };
 }

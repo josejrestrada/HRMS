@@ -379,3 +379,18 @@ Follows DESIGN.md section 4.1 (greeting and today's status, balance cards, upcom
 - **Attention:** days that need fixing with the date the window closes (also the previous month while its window is still open),
   days that can no longer be fixed and count as unpaid, and (for managers and HR) requests waiting for them.
 - **Not in this slice:** team calendar, birthdays and anniversaries, announcements, and any HR numbers. The screen shows only the signed-in person's own data.
+
+## 2026-10-30: Dashboard buttons and the first reports
+
+The three buttons on the HR dashboard were disabled placeholders ("Soon"). They now work.
+
+- **Add employee** links to `/app/people/new`. **Review leave** links to `/app/leave/approvals`. No new rules; both pages already check the HR role on the server.
+- **Run report** opens a new HR-only page, `/app/reports` ("Reports" in the navigation, HR only). ARCHITECTURE.md section 10 lists five reports; this slice builds three,
+  each with an on-screen table and a **Download CSV** button:
+  1. **Headcount**: every active employee with department, location, employment type and joining date.
+  2. **Leave balances**: every active employee with available days (balance minus held days) for CL, SL and EL.
+  3. **Attendance summary**: one month, per employee: days present, work from home, half day, on leave, absent (missed punches count as absent), weekly offs, holidays and late marks.
+     Days outside a person's employment are not counted. For a locked month the numbers come from the frozen copy; for an open month they are derived, as on the attendance pages.
+- **Not in this slice (still in section 10):** leave taken by period and department, and manager (team) access to reports. Reports are HR only for now.
+- **CSV safety:** values are quoted and escaped; a cell starting with `=`, `+`, `-` or `@` gets a leading apostrophe so spreadsheets do not run it as a formula.
+  Reports hold no Aadhaar, PAN or bank data. Every download is written to the audit log.

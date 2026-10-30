@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 import type { HrDashboard } from "@/modules/reports/data";
 import { daysBetween, formatDate, weekdayName } from "@/shared/dates";
@@ -143,12 +144,15 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
           </p>
         </div>
         <ul className="quick-actions" aria-label="Quick actions">
-          {["Add employee", "Review leave", "Run report"].map((a) => (
-            <li key={a}>
-              <button type="button" className="btn btn-secondary btn-small" disabled aria-disabled="true">
-                {a}
-                <span className="btn-soon">Soon</span>
-              </button>
+          {[
+            { label: "Add employee", href: "/app/people/new" },
+            { label: "Review leave", href: "/app/leave/approvals" },
+            { label: "Run report", href: "/app/reports" },
+          ].map((a) => (
+            <li key={a.label}>
+              <Link href={a.href} className="btn btn-secondary btn-small">
+                {a.label}
+              </Link>
             </li>
           ))}
         </ul>
