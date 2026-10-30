@@ -26,3 +26,14 @@ export const regularizationDecisionSchema = z
     }
   });
 export type RegularizationDecisionInput = z.infer<typeof regularizationDecisionSchema>;
+
+export const wfhRequestSchema = z.object({
+  startDate: isoDate,
+  endDate: isoDate,
+  reason: z
+    .string({ error: "Please give a short reason." })
+    .trim()
+    .min(3, "Please give a short reason.")
+    .max(300, "The reason is too long (300 characters at most)."),
+});
+export type WfhRequestInput = z.infer<typeof wfhRequestSchema>;

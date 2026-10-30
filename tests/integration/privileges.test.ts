@@ -30,7 +30,7 @@ describe.skipIf(!enabled)("application role privileges (hrms_app)", () => {
     (await pool.query("select has_table_privilege('hrms_app', $1, $2) as ok", [`public.${table}`, privilege])).rows[0].ok as boolean;
 
   it("knows about the tables it is checking", () => {
-    expect(tables).toEqual(expect.arrayContaining(["employee", "leave_ledger", "punch", "regularization", "compoff_request", "attendance_period", "attendance_day", "attendance_policy", "agent_conversation", "agent_message", "agent_draft"]));
+    expect(tables).toEqual(expect.arrayContaining(["employee", "leave_ledger", "punch", "regularization", "compoff_request", "attendance_period", "attendance_day", "attendance_policy", "agent_conversation", "agent_message", "agent_draft", "wfh_request"]));
   });
 
   it("can read every application table, and cannot touch the migration record", async () => {
@@ -61,7 +61,7 @@ describe.skipIf(!enabled)("application role privileges (hrms_app)", () => {
   });
 
   it("refuses to truncate the newer protected tables even for the owner (defence in depth)", async () => {
-    for (const t of ["regularization", "compoff_request", "attendance_day", "punch", "leave_ledger", "attendance_period", "audit_log", "employee", "agent_conversation", "agent_message", "agent_draft"]) {
+    for (const t of ["regularization", "compoff_request", "attendance_day", "punch", "leave_ledger", "attendance_period", "audit_log", "employee", "agent_conversation", "agent_message", "agent_draft", "wfh_request"]) {
       const c = await pool.connect();
       try {
         await c.query("begin");

@@ -347,3 +347,21 @@ overloaded (timeouts), so the default is gemini-3.5-flash (about 5 s for a small
 was about 1 s). Gemini rejects `additionalProperties` in tool schemas and needs the returned thought signature sent
 back with a tool call; both are handled in `gemini.ts`. Our own strict validation still rejects unknown arguments.
 Override with AGENT_MODEL. Groq is still untested live. Plan and data-handling terms are still to be decided.
+
+## 2026-10-30: Work-from-home requests (assumptions to confirm)
+
+The sources only say that approved work from home counts as present and needs no leave (R27) and that employees
+can request it. The rest below is a **default I chose so the flow can be built; please confirm or change each one**.
+
+- **Who may ask:** only people whose location allows it. Panaji head office: yes. Verna plant: no (shop-floor work).
+  Stored per location in `attendance_policy.wfh_allowed`. Changing it is a migration for now (the app role cannot edit policy rows).
+- **How many:** at most **4 days a month**, counting pending and approved days (`wfh_days_per_month`).
+- **Which days:** today or up to 30 days ahead. No backdating; a past day that needs fixing goes through regularization.
+  Weekly offs, holidays and days of approved leave in the chosen range are skipped. A range with no working day is refused.
+- **Who decides:** the manager, or HR, never the person themselves (same rule as leave and regularization, `canDecide`).
+  Requests are one row per day, grouped in a batch, so a manager can approve a whole week at once. Rejecting needs a reason.
+  The approvals list shows how long each request has waited (escalation to HR after 5 working days, R20, is a later slice with the other reminders).
+- **Cancel:** the person can cancel a pending request any time, and an approved one only while the day is still in the future.
+- **Effect:** an approved day shows as work from home and counts as present, even with no punches (R27). A locked month is never changed:
+  requests, decisions and cancellations for days in a locked month are refused (R65), and the frozen copy already stores the day.
+- **Not in this slice:** emails, WFH on the HR assistant, HR filing on someone's behalf, a team calendar bar for WFH.

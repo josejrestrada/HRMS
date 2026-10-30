@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation";
-import type { DaySheet, LockPreview, MonthLockRow, MyAttendance, RegularizationApproval } from "@/modules/attendance/data";
+import type { DaySheet, LockPreview, MonthLockRow, MyAttendance, MyWfh, RegularizationApproval, WfhApproval } from "@/modules/attendance/data";
 import { defaultFixTimes, deriveDay, isFixable, summarizeMonth, type DayResult, type Policy, type PunchTime } from "@/modules/attendance/rules";
 import { MyAttendanceView } from "../../(clerk)/app/attendance/_components/my-attendance-view";
 import { AttendanceApprovalsView } from "../../(clerk)/app/attendance/_components/approvals-view";
+import { WfhView } from "../../(clerk)/app/attendance/_components/wfh-view";
 import { LockView } from "../../(clerk)/app/attendance/_components/lock-view";
 import { TeamView } from "../../(clerk)/app/attendance/_components/team-view";
 
@@ -104,6 +105,23 @@ const lockMonths: MonthLockRow[] = Array.from({ length: 12 }, (_, i) => {
   if (month === 9) return { month, state: "open" as const, lockedAt: null, lockedBy: null, employees: null };
   return { month, state: "future" as const, lockedAt: null, lockedBy: null, employees: null };
 });
+const wfhApprovals: WfhApproval[] = [
+  { id: "w1", batchId: "wb1", employeeId: "e1", employeeCode: "KCF0016", employeeName: "Nikhil Mhambre", date: "2026-11-03", reason: "Waiting for a repair visit", waitingDays: 1, monthDays: 2 },
+  { id: "w2", batchId: "wb1", employeeId: "e1", employeeCode: "KCF0016", employeeName: "Nikhil Mhambre", date: "2026-11-04", reason: "Waiting for a repair visit", waitingDays: 1, monthDays: 2 },
+];
+const wfhData: MyWfh = {
+  today: "2026-10-30",
+  allowed: true,
+  daysPerMonth: 4,
+  usedThisMonth: 1,
+  latestDate: "2026-11-29",
+  requests: [
+    { id: "r1", date: "2026-11-03", status: "pending", reason: "Repair visit", decisionNote: null, canCancel: true },
+    { id: "r2", date: "2026-10-30", status: "approved", reason: "Doctor appointment", decisionNote: null, canCancel: false },
+    { id: "r3", date: "2026-10-16", status: "rejected", reason: "Home", decisionNote: "Month-end closing", canCancel: false },
+  ],
+};
+
 const lockPreview: LockPreview = {
   year: 2026,
   month: 9,
@@ -141,8 +159,10 @@ export default async function AttendancePreview({ searchParams }: { searchParams
             />
           ) : view === "team" ? (
             <TeamView sheet={sheet} today={TODAY} pending={3} />
+          ) : view === "wfh" || view === "wfhoff" ? (
+            <WfhView data={{ ...wfhData, allowed: view === "wfh" }} isHr canApprove pending={3} saved="requested" count="2" skipped="1" />
           ) : view === "approvals" ? (
-            <AttendanceApprovalsView rows={approvals} isHr saved="approved" count="2" />
+            <AttendanceApprovalsView rows={approvals} wfh={wfhApprovals} isHr saved="approved" count="2" />
           ) : (
             <MyAttendanceView data={my} isHr canApprove pendingApprovals={3} saved="fix" count="2" />
           )}

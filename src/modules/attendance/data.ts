@@ -12,7 +12,11 @@ import {
   MONTH_NAMES,
   allocateUnpaid,
   canLockMonth,
+  WFH_MAX_DAYS_AHEAD,
+  WFH_MAX_RANGE_DAYS,
   canRegularize,
+  canWorkFromHomeOn,
+  checkWfhWindow,
   checkFixTimes,
   defaultFixTimes,
   deriveDay,
@@ -22,6 +26,7 @@ import {
   nextPunchDirection,
   spanAt,
   summarizeMonth,
+  wfhLimitError,
   type DayResult,
   type MonthSummary,
   type Policy,
@@ -168,7 +173,7 @@ async function deriveRange(
     ...new Set([...spans.map((sp) => sp.locationId), ...workforce.map((w) => w.locationId).filter((l): l is string => !!l)]),
   ];
 
-  const [policyRows, punchRows, facts, fixRows, frozenRows] = await Promise.all([
+  const [policyRows, punchRows, facts, fixRows, frozenRows, wfhRows] = await Promise.all([
     q.query<{
       location_id: string;
       work_start: string;
@@ -214,7 +219,15 @@ async function deriveRange(
             where locked and employee_id = any($1::uuid[]) and work_date between $2::date and $3::date`,
           [ids, from, to],
         ),
+    ids.length === 0
+      ? Promise.resolve([] as { employee_id: string; d: string }[])
+      : q.query<{ employee_id: string; d: string }>(
+          `select employee_id, work_date::text as d from wfh_request
+            where employee_id = any($1::uuid[]) and status = 'approved' and work_date between $2::date and $3::date`,
+          [ids, from, to],
+        ),
   ]);
+  const wfhDays = new Set(wfhRows.map((w) => `${w.employee_id}|${w.d}`));
   const frozenBy = new Map(frozenRows.map((f) => [`${f.employee_id}|${f.d}`, f]));
   const fixBy = new Map(fixRows.map((f) => [`${f.employee_id}|${f.d}`, { in: f.in_time, out: f.out_time, status: f.status }]));
 
@@ -303,7 +316,7 @@ async function deriveRange(
           holiday: span ? (holidayBy.get(`${span.locationId}|${date}`) ?? null) : null,
           leave: leave ? leave.part : null,
           unpaidLeave: unpaidLeave.get(`${w.id}|${date}`) ?? 0,
-          wfh: false, // work from home requests arrive in the next slice
+          wfh: wfhDays.has(`${w.id}|${date}`),
           punches: punchesBy.get(`${w.id}|${date}`) ?? [],
           policy: (span && policies.get(span.locationId)) || DEFAULT_POLICY,
           regularization: fixBy.get(`${w.id}|${date}`) ?? null,
@@ -656,6 +669,296 @@ export async function listRegularizationApprovals(actor: Actor | null, q: Querya
   }));
 }
 
+// ---------------------------------------------------------------------------------------------
+// Work from home requests (docs/decisions.md, "Work-from-home requests")
+// ---------------------------------------------------------------------------------------------
+
+export type MyWfhRequest = {
+  id: string;
+  date: string;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  reason: string;
+  decisionNote: string | null;
+  canCancel: boolean;
+};
+
+export type MyWfh = {
+  today: string;
+  allowed: boolean;
+  daysPerMonth: number;
+  /** Pending and approved days in the current month. */
+  usedThisMonth: number;
+  latestDate: string;
+  requests: MyWfhRequest[];
+};
+
+export type WfhApproval = {
+  id: string;
+  batchId: string;
+  employeeId: string;
+  employeeCode: string;
+  employeeName: string;
+  date: string;
+  reason: string;
+  waitingDays: number;
+  /** Pending and approved days this person already has in that month, including this one. */
+  monthDays: number;
+};
+
+export type WfhInput = { startDate: string; endDate: string; reason: string };
+
+async function wfhPolicyFor(tx: Queryable, actor: Actor, from: string, to: string): Promise<(date: string) => { allowed: boolean; limit: number }> {
+  const spans = await getAssignmentSpans(actor, [actor.employeeId], from, to, tx);
+  const rows = await tx.query<{ location_id: string; wfh_allowed: boolean; wfh_days_per_month: number }>(
+    "select location_id, wfh_allowed, wfh_days_per_month from attendance_policy where location_id = any($1::uuid[])",
+    [[...new Set(spans.map((s) => s.locationId))]],
+  );
+  const by = new Map(rows.map((r) => [r.location_id, { allowed: r.wfh_allowed, limit: r.wfh_days_per_month }]));
+  return (date) => {
+    const span = spanAt(spans, date);
+    return (span && by.get(span.locationId)) || { allowed: false, limit: 0 };
+  };
+}
+
+async function openWfhInMonth(tx: Queryable, employeeId: string, year: number, month: number): Promise<number> {
+  const rows = await tx.query<{ n: number }>(
+    `select count(*)::int as n from wfh_request
+      where employee_id = $1 and status in ('pending', 'approved') and work_date between $2::date and $3::date`,
+    [employeeId, monthStart(year, month), monthEnd(year, month)],
+  );
+  return rows[0].n;
+}
+
+export async function getMyWfh(actor: Actor | null, q: Queryable = { query }): Promise<MyWfh> {
+  requireEmployee(actor);
+  const today = todayIST();
+  const latestDate = addDays(today, WFH_MAX_DAYS_AHEAD);
+  const [y, m] = today.split("-").map(Number);
+  const policyAt = await wfhPolicyFor(q, actor, today, latestDate);
+  const here = policyAt(today);
+  const rows = await q.query<{ id: string; d: string; status: MyWfhRequest["status"]; reason: string; decision_note: string | null }>(
+    `select id, work_date::text as d, status, reason, decision_note from wfh_request
+      where employee_id = $1 order by work_date desc, created_at desc limit 30`,
+    [actor.employeeId],
+  );
+  return {
+    today,
+    allowed: here.allowed,
+    daysPerMonth: here.limit,
+    usedThisMonth: await openWfhInMonth(q, actor.employeeId, y, m),
+    latestDate,
+    requests: rows.map((r) => ({
+      id: r.id,
+      date: r.d,
+      status: r.status,
+      reason: r.reason,
+      decisionNote: r.decision_note,
+      canCancel: r.status === "pending" || (r.status === "approved" && r.d > today),
+    })),
+  };
+}
+
+/** Ask to work from home on every working day from the start date to the end date. */
+export async function requestWfhTx(tx: Queryable, actor: Actor | null, input: WfhInput): Promise<{ batchId: string; count: number; skipped: string[] }> {
+  requireEmployee(actor);
+  const today = todayIST();
+  const emp = (await tx.query<{ status: string }>("select status from employee where id = $1 for update", [actor.employeeId]))[0];
+  if (!emp || emp.status !== "active") throw new DomainError("Only active employees can ask to work from home.");
+
+  const reason = input.reason.trim();
+  if (reason.length < 3) throw new DomainError("Please give a short reason.");
+  const window = checkWfhWindow({ start: input.startDate, end: input.endDate, today, latest: addDays(today, WFH_MAX_DAYS_AHEAD) });
+  if (!window.ok) throw new DomainError(window.error);
+  const asked = datesBetween(input.startDate, input.endDate);
+  if (asked.length > WFH_MAX_RANGE_DAYS) throw new DomainError(`Please choose at most ${WFH_MAX_RANGE_DAYS} days at a time.`);
+
+  await lockMonthsShared(tx, asked); // R65
+  const lockedMonth = await firstLockedMonth(tx, asked);
+  if (lockedMonth) {
+    const [y, m] = lockedMonth.split("-").map(Number);
+    throw new DomainError(`${MONTH_NAMES[m - 1]} ${y} is locked, so it can no longer be changed. Please talk to HR.`);
+  }
+
+  const policyAt = await wfhPolicyFor(tx, actor, input.startDate, input.endDate);
+  const { days } = await deriveRange(actor, [actor.employeeId], input.startDate, input.endDate, tx);
+  const mine = new Map((days.get(actor.employeeId) ?? []).map((d) => [d.date, d]));
+  const open = new Set(
+    (
+      await tx.query<{ d: string }>(
+        "select work_date::text as d from wfh_request where employee_id = $1 and status in ('pending', 'approved') and work_date between $2::date and $3::date",
+        [actor.employeeId, input.startDate, input.endDate],
+      )
+    ).map((r) => r.d),
+  );
+
+  const dates: string[] = [];
+  const skipped: string[] = [];
+  for (const date of asked) {
+    const day = mine.get(date);
+    if (!day || !canWorkFromHomeOn(day) || open.has(date)) skipped.push(date);
+    else dates.push(date);
+  }
+  if (dates.length === 0) throw new DomainError("There is no working day to ask for in these dates (weekly offs, holidays, leave and days already requested are skipped).");
+
+  // Where you work on the first day decides whether it is allowed and how many days a month you get.
+  const rule = policyAt(dates[0]);
+  if (!rule.allowed) throw new DomainError("Work from home is not available for your location. Please talk to your manager or HR.");
+  const byMonth = new Map<string, string[]>();
+  for (const d of dates) byMonth.set(d.slice(0, 7), [...(byMonth.get(d.slice(0, 7)) ?? []), d]);
+  for (const [key, list] of byMonth) {
+    const [y, m] = key.split("-").map(Number);
+    const err = wfhLimitError({
+      monthLabel: `${MONTH_NAMES[m - 1]} ${y}`,
+      alreadyUsed: await openWfhInMonth(tx, actor.employeeId, y, m),
+      asking: list.length,
+      limit: policyAt(list[0]).limit,
+    });
+    if (err) throw new DomainError(err);
+  }
+
+  const batchId = (await tx.query<{ id: string }>("select gen_random_uuid()::text as id"))[0].id;
+  for (const date of dates) {
+    await tx.query("insert into wfh_request (employee_id, work_date, batch_id, reason) values ($1, $2, $3, $4)", [actor.employeeId, date, batchId, reason]);
+  }
+  await recordAudit(
+    {
+      actorEmployeeId: actor.employeeId,
+      action: "wfh_requested",
+      entity: "wfh_request",
+      entityId: batchId,
+      summary: `${dates.length} ${dates.length === 1 ? "day" : "days"}: ${dates.join(", ")}`,
+    },
+    tx,
+  );
+  return { batchId, count: dates.length, skipped };
+}
+
+export async function requestWfh(actor: Actor | null, input: WfhInput) {
+  requireEmployee(actor);
+  return transaction((tx) => requestWfhTx(tx, actor, input));
+}
+
+export async function cancelWfhTx(tx: Queryable, actor: Actor | null, requestId: string): Promise<void> {
+  requireEmployee(actor);
+  const req = (
+    await tx.query<{ employee_id: string; status: string; d: string }>(
+      "select employee_id, status, work_date::text as d from wfh_request where id = $1 for update",
+      [requestId],
+    )
+  )[0];
+  if (!req) throw new DomainError("That request was not found.");
+  if (req.employee_id !== actor.employeeId) throw new ForbiddenError("You cannot cancel this request.");
+  const today = todayIST();
+  if (req.status === "approved" && req.d <= today) throw new DomainError("An approved day can only be cancelled before the day starts.");
+  if (req.status !== "pending" && req.status !== "approved") throw new DomainError("This request is already closed.");
+  await lockMonthsShared(tx, [req.d]); // R65
+  if (await firstLockedMonth(tx, [req.d])) throw new DomainError("That month is locked, so this request can no longer be changed.");
+  await tx.query("update wfh_request set status = 'cancelled' where id = $1", [requestId]);
+  await recordAudit({ actorEmployeeId: actor.employeeId, action: "wfh_cancelled", entity: "wfh_request", entityId: requestId, summary: req.d }, tx);
+}
+
+export async function cancelWfh(actor: Actor | null, requestId: string) {
+  requireEmployee(actor);
+  return transaction((tx) => cancelWfhTx(tx, actor, requestId));
+}
+
+/** Approve or reject one or more days together. All or nothing. */
+export async function decideWfhTx(
+  tx: Queryable,
+  actor: Actor | null,
+  input: { requestIds: string[]; decision: "approve" | "reject"; note?: string },
+): Promise<{ count: number }> {
+  requireEmployee(actor);
+  if (input.requestIds.length === 0) throw new DomainError("Choose at least one request.");
+  const isHr = actor.roles.includes("hr_admin");
+  const dates: string[] = [];
+
+  for (const id of input.requestIds) {
+    const req = (
+      await tx.query<{ employee_id: string; status: string; d: string }>(
+        "select employee_id, status, work_date::text as d from wfh_request where id = $1 for update",
+        [id],
+      )
+    )[0];
+    if (!req) throw new DomainError("That request was not found.");
+    if (req.status !== "pending") throw new DomainError("A request has already been decided or cancelled.");
+    await lockMonthsShared(tx, [req.d]); // R65
+    if (await firstLockedMonth(tx, [req.d])) throw new DomainError("That month is locked, so this request can no longer be decided.");
+    const allowed = canDecide({
+      actorEmployeeId: actor.employeeId,
+      actorIsHrAdmin: isHr,
+      actorIsManagerOfRequester: await isCurrentManagerOf(tx, actor.employeeId, req.employee_id),
+      requesterEmployeeId: req.employee_id,
+    });
+    if (!allowed) throw new ForbiddenError("You cannot decide this request.");
+    if (input.decision === "approve" && req.d < todayIST()) throw new DomainError("This day has already passed, so it cannot be approved. You can reject it to close it.");
+    await tx.query(
+      "update wfh_request set status = $2, approver_id = $3, decided_at = now(), decision_note = $4 where id = $1",
+      [id, input.decision === "approve" ? "approved" : "rejected", actor.employeeId, input.note ?? null],
+    );
+    dates.push(req.d);
+  }
+  await recordAudit(
+    {
+      actorEmployeeId: actor.employeeId,
+      action: input.decision === "approve" ? "wfh_approved" : "wfh_rejected",
+      entity: "wfh_request",
+      entityId: input.requestIds[0],
+      summary: `${dates.length} ${dates.length === 1 ? "day" : "days"}: ${dates.sort().join(", ")}`,
+    },
+    tx,
+  );
+  return { count: dates.length };
+}
+
+export async function decideWfh(actor: Actor | null, input: { requestIds: string[]; decision: "approve" | "reject"; note?: string }) {
+  requireEmployee(actor);
+  return transaction((tx) => decideWfhTx(tx, actor, input));
+}
+
+/** Pending requests the signed-in person may decide: direct reports for a manager, everyone for HR (never their own). */
+export async function listWfhApprovals(actor: Actor | null, q: Queryable = { query }): Promise<WfhApproval[]> {
+  requireEmployee(actor);
+  const isHr = actor.roles.includes("hr_admin");
+  const reportIds = isHr ? null : await getDirectReportIds(actor, q);
+  if (reportIds !== null && reportIds.length === 0) return [];
+  const today = todayIST();
+  const rows = await q.query<{
+    id: string;
+    batch_id: string;
+    employee_id: string;
+    employee_code: string;
+    full_name: string;
+    d: string;
+    reason: string;
+    waiting: number;
+    month_days: number;
+  }>(
+    `select r.id, r.batch_id, e.id as employee_id, e.employee_code, e.full_name, r.work_date::text as d, r.reason,
+            ($3::date - (r.created_at at time zone 'Asia/Kolkata')::date)::int as waiting,
+            (select count(*)::int from wfh_request o
+              where o.employee_id = r.employee_id and o.status in ('pending', 'approved')
+                and date_trunc('month', o.work_date) = date_trunc('month', r.work_date)) as month_days
+       from wfh_request r join employee e on e.id = r.employee_id
+      where r.status = 'pending' and e.status = 'active' and e.id <> $1
+        and ($2::uuid[] is null or e.id = any($2::uuid[]))
+      order by r.created_at, r.work_date
+      limit 200`,
+    [actor.employeeId, reportIds, today],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    batchId: r.batch_id,
+    employeeId: r.employee_id,
+    employeeCode: r.employee_code,
+    employeeName: r.full_name,
+    date: r.d,
+    reason: r.reason,
+    waitingDays: r.waiting,
+    monthDays: r.month_days,
+  }));
+}
+
 /** For tabs and navigation: can this person approve attendance fixes, and how many are waiting? */
 export async function getAttendanceApprovalScope(actor: Actor | null): Promise<{ canApprove: boolean; pending: number }> {
   requireEmployee(actor);
@@ -663,7 +966,7 @@ export async function getAttendanceApprovalScope(actor: Actor | null): Promise<{
   const reports = isHr ? [] : await getDirectReportIds(actor);
   const canApprove = isHr || reports.length > 0;
   if (!canApprove) return { canApprove, pending: 0 };
-  return { canApprove, pending: (await listRegularizationApprovals(actor)).length };
+  return { canApprove, pending: (await listRegularizationApprovals(actor)).length + (await listWfhApprovals(actor)).length };
 }
 
 // ---------------------------------------------------------------------------------------------

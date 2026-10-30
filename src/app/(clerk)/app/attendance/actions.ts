@@ -5,8 +5,8 @@ import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/shared/auth";
 import { DomainError } from "@/shared/errors";
 import { requireRole } from "@/shared/roles";
-import { cancelRegularization, decideRegularizations, lockMonth, punch, requestRegularizations } from "@/modules/attendance/data";
-import { regularizationDecisionSchema, regularizeSchema } from "@/modules/attendance/schemas";
+import { cancelRegularization, cancelWfh, decideRegularizations, decideWfh, lockMonth, punch, requestRegularizations, requestWfh } from "@/modules/attendance/data";
+import { regularizationDecisionSchema, regularizeSchema, wfhRequestSchema } from "@/modules/attendance/schemas";
 import { ForbiddenError } from "@/shared/roles";
 import { blankToUndefined, formValues } from "@/shared/validation";
 import { z } from "zod";
@@ -116,4 +116,59 @@ export async function lockMonthAction(formData: FormData) {
   redirect(
     `/app/attendance/lock?${new URLSearchParams({ year: String(year), saved: "locked", month: String(month), people: String(result.employees), unpaid: String(result.unpaidDays) }).toString()}`,
   );
+}
+
+// ---- Work from home ----
+
+export async function requestWfhAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const actor = await getCurrentActor();
+  requireRole(actor, "employee");
+  const values = formValues(formData);
+  const parsed = wfhRequestSchema.safeParse(blankToUndefined(values));
+  if (!parsed.success) return { error: firstIssue(parsed.error), values };
+  let result;
+  try {
+    result = await requestWfh(actor, parsed.data);
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message, values };
+    throw err;
+  }
+  revalidatePath("/app/attendance", "layout");
+  redirect(`/app/attendance/wfh?saved=requested&count=${result.count}&skipped=${result.skipped.length}`);
+}
+
+export async function cancelWfhAction(formData: FormData) {
+  const actor = await getCurrentActor();
+  requireRole(actor, "employee");
+  const id = z.uuid().safeParse(formValues(formData).requestId);
+  if (!id.success) redirect("/app/attendance/wfh");
+  try {
+    await cancelWfh(actor, id.data);
+  } catch (err) {
+    if (err instanceof DomainError) backWithError("/app/attendance/wfh", err.message);
+    throw err;
+  }
+  revalidatePath("/app/attendance", "layout");
+  redirect("/app/attendance/wfh?saved=cancelled");
+}
+
+/** Approve or reject one day or a whole batch (every `requestId` field in the form). */
+export async function decideWfhAction(formData: FormData) {
+  const actor = await getCurrentActor();
+  requireRole(actor, "employee");
+  const values = blankToUndefined(formValues(formData));
+  const parsed = regularizationDecisionSchema.safeParse({
+    requestIds: formData.getAll("requestId").filter((v): v is string => typeof v === "string"),
+    decision: values.decision,
+    note: values.note,
+  });
+  if (!parsed.success) backWithError("/app/attendance/approvals", firstIssue(parsed.error));
+  try {
+    await decideWfh(actor, parsed.data);
+  } catch (err) {
+    if (err instanceof DomainError || err instanceof ForbiddenError) backWithError("/app/attendance/approvals", err.message);
+    throw err;
+  }
+  revalidatePath("/app/attendance", "layout");
+  redirect(`/app/attendance/approvals?saved=wfh${parsed.data.decision === "approve" ? "approved" : "rejected"}&count=${parsed.data.requestIds.length}`);
 }

@@ -343,3 +343,30 @@ export function spanAt<T extends Span>(spans: T[], date: string): T | null {
   }
   return best;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Work from home (docs/decisions.md, "Work-from-home requests")
+// ---------------------------------------------------------------------------------------------
+
+export const WFH_MAX_DAYS_AHEAD = 30;
+export const WFH_MAX_RANGE_DAYS = 31;
+
+/** The dates asked for must run from today to at most 30 days ahead. Past days go through regularization. */
+export function checkWfhWindow(i: { start: string; end: string; today: string; latest: string }): RegularizeCheck {
+  if (i.end < i.start) return { ok: false, error: "The end date is before the start date." };
+  if (i.start < i.today) return { ok: false, error: "Work from home cannot be asked for a day that has passed. A past day can be fixed under Days to fix." };
+  if (i.end > i.latest) return { ok: false, error: `Work from home can be asked for up to ${WFH_MAX_DAYS_AHEAD} days ahead.` };
+  return { ok: true };
+}
+
+/** Does a day with this derived status count as a working day on which work from home can be asked for? */
+export function canWorkFromHomeOn(day: { status: DayStatus; employed: boolean }): boolean {
+  return day.employed && !["holiday", "weekly_off", "leave", "half_day", "wfh"].includes(day.status);
+}
+
+/** Pending and approved days both count towards the monthly limit. */
+export function wfhLimitError(i: { monthLabel: string; alreadyUsed: number; asking: number; limit: number }): string | null {
+  if (i.alreadyUsed + i.asking <= i.limit) return null;
+  const left = Math.max(0, i.limit - i.alreadyUsed);
+  return `${i.monthLabel}: you can work from home ${i.limit} days a month and have ${left} left, but you asked for ${i.asking}.`;
+}

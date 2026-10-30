@@ -1,10 +1,11 @@
 import { formatDate, weekdayName } from "@/shared/dates";
-import type { RegularizationApproval } from "@/modules/attendance/data";
+import type { RegularizationApproval, WfhApproval } from "@/modules/attendance/data";
 import { Avatar, displayName, plural } from "../../_components/ui";
-import { decideRegularizationAction } from "../actions";
+import { decideRegularizationAction, decideWfhAction } from "../actions";
 import { AttendanceTabs } from "./attendance-tabs";
 
 const SAVED: Record<string, string> = { approved: "approved", rejected: "rejected" };
+const SAVED_WFH: Record<string, string> = { wfhapproved: "approved", wfhrejected: "rejected" };
 
 type Group = { key: string; employeeName: string; employeeCode: string; reason: string; waitingDays: number; rows: RegularizationApproval[] };
 
@@ -18,8 +19,19 @@ function group(rows: RegularizationApproval[]): Group[] {
   return [...map.values()];
 }
 
+function groupWfh(rows: WfhApproval[]) {
+  const map = new Map<string, { key: string; employeeName: string; employeeCode: string; reason: string; waitingDays: number; rows: WfhApproval[] }>();
+  for (const r of rows) {
+    const g = map.get(r.batchId) ?? { key: r.batchId, employeeName: r.employeeName, employeeCode: r.employeeCode, reason: r.reason, waitingDays: r.waitingDays, rows: [] };
+    g.rows.push(r);
+    map.set(r.batchId, g);
+  }
+  return [...map.values()];
+}
+
 export function AttendanceApprovalsView(props: {
   rows: RegularizationApproval[];
+  wfh: WfhApproval[];
   isHr: boolean;
   saved?: string;
   count?: string;
@@ -31,14 +43,19 @@ export function AttendanceApprovalsView(props: {
       <div className="page-head">
         <h1>Attendance approvals</h1>
         <p className="muted">
-          {props.isHr ? "Fixes from everyone, except your own." : "Fixes from the people who report to you."} Approving replaces the day&apos;s times; the original
+          {props.isHr ? "Requests from everyone, except your own." : "Requests from the people who report to you."} Approving a fix replaces the day&apos;s times; the original
           check-ins are always kept.
         </p>
       </div>
-      <AttendanceTabs current="approvals" isHr={props.isHr} canApprove pending={props.rows.length} />
+      <AttendanceTabs current="approvals" isHr={props.isHr} canApprove pending={props.rows.length + props.wfh.length} />
       {props.saved && SAVED[props.saved] ? (
         <div className="alert alert-ok" role="status">
           {plural(Number(props.count ?? "1"), "fix", "fixes")} {SAVED[props.saved]}.
+        </div>
+      ) : null}
+      {props.saved && SAVED_WFH[props.saved] ? (
+        <div className="alert alert-ok" role="status">
+          {plural(Number(props.count ?? "1"), "work-from-home day", "work-from-home days")} {SAVED_WFH[props.saved]}.
         </div>
       ) : null}
       {props.error ? <div className="alert alert-error" role="alert">{props.error}</div> : null}
@@ -84,6 +101,58 @@ export function AttendanceApprovalsView(props: {
                     ))}
                     <label className="sr-only" htmlFor={`note-${g.key}`}>Note</label>
                     <input id={`note-${g.key}`} name="note" type="text" maxLength={300} placeholder="Reason (needed to reject)" />
+                    <button type="submit" name="decision" value="approve" className="btn btn-primary btn-small">Approve all {g.rows.length}</button>
+                    <button type="submit" name="decision" value="reject" className="btn btn-secondary btn-small">Reject all</button>
+                  </form>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="panel" aria-label="Pending work-from-home requests">
+        <div className="panel-head">
+          <h2>Work from home</h2>
+        </div>
+        {props.wfh.length === 0 ? (
+          <p className="empty">No work-from-home requests are waiting.</p>
+        ) : (
+          <ul className="approval-list">
+            {groupWfh(props.wfh).map((g) => (
+              <li key={g.key} className="approval approval-stack">
+                <div className="approval-info">
+                  <span className="person">
+                    <Avatar name={g.employeeName} />
+                    <span>
+                      {displayName(g.employeeName)}
+                      <span className="sub">{g.employeeCode}</span>
+                    </span>
+                  </span>
+                  <p className="muted">&ldquo;{g.reason}&rdquo; &middot; waiting {g.waitingDays === 0 ? "since today" : plural(g.waitingDays, "day", "days")}</p>
+                  <ul className="rows">
+                    {g.rows.map((r) => (
+                      <li key={r.id}>
+                        <span>
+                          {weekdayName(r.date).slice(0, 3)} {formatDate(r.date)}
+                          <span className="sub">{plural(r.monthDays, "day", "days")} at home that month</span>
+                        </span>
+                        <form action={decideWfhAction} className="inline-form">
+                          <input type="hidden" name="requestId" value={r.id} />
+                          <button type="submit" name="decision" value="approve" className="btn btn-primary btn-small">Approve</button>
+                          <button type="submit" name="decision" value="reject" className="btn btn-secondary btn-small">Reject</button>
+                        </form>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                {g.rows.length > 1 ? (
+                  <form action={decideWfhAction} className="approval-actions">
+                    {g.rows.map((r) => (
+                      <input key={r.id} type="hidden" name="requestId" value={r.id} />
+                    ))}
+                    <label className="sr-only" htmlFor={`wfh-note-${g.key}`}>Note</label>
+                    <input id={`wfh-note-${g.key}`} name="note" type="text" maxLength={300} placeholder="Reason (needed to reject)" />
                     <button type="submit" name="decision" value="approve" className="btn btn-primary btn-small">Approve all {g.rows.length}</button>
                     <button type="submit" name="decision" value="reject" className="btn btn-secondary btn-small">Reject all</button>
                   </form>

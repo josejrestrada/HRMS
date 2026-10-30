@@ -1,5 +1,5 @@
 import { getCurrentActor } from "@/shared/auth";
-import { getAttendanceApprovalScope, listRegularizationApprovals } from "@/modules/attendance/data";
+import { getAttendanceApprovalScope, listRegularizationApprovals, listWfhApprovals } from "@/modules/attendance/data";
 import { NoAccess, NotLinked } from "../../_components/ui";
 import { AttendanceApprovalsView } from "../_components/approvals-view";
 
@@ -12,6 +12,6 @@ export default async function AttendanceApprovalsPage({ searchParams }: { search
   const scope = await getAttendanceApprovalScope(actor);
   if (!scope.canApprove) return <NoAccess />;
   const sp = await searchParams;
-  const rows = await listRegularizationApprovals(actor);
-  return <AttendanceApprovalsView rows={rows} isHr={actor.roles.includes("hr_admin")} saved={first(sp.saved)} count={first(sp.count)} error={first(sp.error)} />;
+  const [rows, wfh] = await Promise.all([listRegularizationApprovals(actor), listWfhApprovals(actor)]);
+  return <AttendanceApprovalsView rows={rows} wfh={wfh} isHr={actor.roles.includes("hr_admin")} saved={first(sp.saved)} count={first(sp.count)} error={first(sp.error)} />;
 }
