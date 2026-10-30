@@ -1426,7 +1426,7 @@ textarea {
 }
 
 @media (min-width: 960px) {
-  .approval {
+  .approval:not(.approval-stack) {
     flex-direction: row;
     align-items: flex-start;
     justify-content: space-between;
@@ -1604,5 +1604,87 @@ textarea {
   .cal-cell {
     min-height: 84px;
     font-size: 0.78rem;
+  }
+}
+
+/* regularization */
+.fix-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fix-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.fix-row:last-child {
+  border-bottom: 0;
+}
+
+.fix-day {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.fix-day input {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  flex: none;
+}
+
+.fix-times {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fix-times input[type="time"] {
+  min-height: 44px;
+  padding: 0 10px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font: inherit;
+}
+
+.past-deadline {
+  margin-top: 16px;
+}
+
+.approval-stack {
+  flex-direction: column;
+}
+
+.approval-stack .approval-actions {
+  flex: none;
+  width: 100%;
+  align-items: center;
+}
+
+.approval-stack .approval-actions input[type="text"] {
+  flex: 1 1 260px;
+  max-width: 420px;
+}
+
+.inline-form {
+  display: flex;
+  gap: 8px;
+}
+
+@media (min-width: 640px) {
+  .fix-row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
   }
 }

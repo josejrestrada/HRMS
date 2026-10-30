@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  canRegularize,
+  checkFixTimes,
+  defaultFixTimes,
   deriveDay,
   formatMinutes,
+  isFixable,
   isLate,
   nextPunchDirection,
   summarizeMonth,
@@ -162,5 +166,83 @@ describe("summarizeMonth (R26, R45)", () => {
 describe("formatMinutes", () => {
   it("formats hours and minutes", () => {
     expect([formatMinutes(465), formatMinutes(480), formatMinutes(40)]).toEqual(["7 h 45 m", "8 h", "40 m"]);
+  });
+});
+
+describe("deriveDay with a regularization (R56, R57)", () => {
+  const missed = [{ time: "09:30", direction: "in" as const }];
+
+  it("uses the approved times instead of the raw punches and removes the late mark", () => {
+    const raw = deriveDay(day({ punches: [{ time: "10:30", direction: "in" }] }));
+    expect(raw).toMatchObject({ status: "missed_punch", late: true, needsAction: true });
+    const fixed = deriveDay(day({ punches: [{ time: "10:30", direction: "in" }], regularization: { in: "09:20", out: "17:45", status: "approved" } }));
+    expect(fixed).toMatchObject({ status: "present", firstIn: "09:20", lastOut: "17:45", late: false, needsAction: false, regularized: true, note: "Regularized" });
+  });
+
+  it("keeps a missed punch as it is while the fix is only pending", () => {
+    const r = deriveDay(day({ punches: missed, regularization: { in: "09:30", out: "17:30", status: "pending" } }));
+    expect(r).toMatchObject({ status: "missed_punch", fixPending: true, regularized: false, needsAction: true });
+    expect(isFixable(r)).toBe(false); // already sent, so it is not offered again
+  });
+
+  it("settles a day even if the approved hours are short, so it no longer asks for action", () => {
+    const r = deriveDay(day({ regularization: { in: "09:30", out: "12:00", status: "approved" } }));
+    expect(r).toMatchObject({ status: "absent", needsAction: false, regularized: true });
+  });
+
+  it("still lets a weekly off, a holiday and leave win", () => {
+    const fix = { in: "09:30", out: "17:30", status: "approved" as const };
+    expect(deriveDay(day({ weeklyOff: true, regularization: fix })).status).toBe("weekly_off");
+    expect(deriveDay(day({ holiday: "Christmas", regularization: fix })).status).toBe("holiday");
+    expect(deriveDay(day({ leave: "full", regularization: fix })).status).toBe("leave");
+  });
+
+  it("offers an unfixed problem day again, but not one that was already fixed", () => {
+    expect(isFixable(deriveDay(day({ punches: missed })))).toBe(true);
+    expect(isFixable(deriveDay(day({ punches: missed, regularization: { in: "09:30", out: "17:30", status: "approved" } })))).toBe(false);
+    expect(isFixable(deriveDay(day({ punches: inOut("09:30", "17:30") })))).toBe(false);
+  });
+});
+
+describe("canRegularize (R54, R55)", () => {
+  const base = { regularizeUntilDay: 5 };
+
+  it("allows any past day in the current month", () => {
+    expect(canRegularize({ ...base, date: "2026-10-05", today: "2026-10-30" })).toEqual({ ok: true });
+    expect(canRegularize({ ...base, date: "2026-10-29", today: "2026-10-30" })).toEqual({ ok: true });
+  });
+
+  it("does not allow today or the future", () => {
+    expect(canRegularize({ ...base, date: "2026-10-30", today: "2026-10-30" })).toMatchObject({ ok: false });
+    expect(canRegularize({ ...base, date: "2026-11-02", today: "2026-10-30" })).toMatchObject({ ok: false });
+  });
+
+  it("allows last month up to and including the 5th, and no longer after", () => {
+    expect(canRegularize({ ...base, date: "2026-09-20", today: "2026-10-05" })).toEqual({ ok: true });
+    const late = canRegularize({ ...base, date: "2026-09-20", today: "2026-10-06" });
+    expect(late).toMatchObject({ ok: false });
+    expect((late as { error: string }).error).toContain("September");
+    expect((late as { error: string }).error).toContain("unpaid");
+  });
+
+  it("works across a year end and refuses older months", () => {
+    expect(canRegularize({ ...base, date: "2026-12-15", today: "2027-01-03" })).toEqual({ ok: true });
+    expect(canRegularize({ ...base, date: "2026-12-15", today: "2027-01-09" })).toMatchObject({ ok: false });
+    expect(canRegularize({ ...base, date: "2026-08-15", today: "2026-10-02" })).toMatchObject({ ok: false });
+  });
+});
+
+describe("checkFixTimes and defaultFixTimes", () => {
+  it("accepts a sensible pair and explains each problem", () => {
+    expect(checkFixTimes("09:20", "17:45")).toEqual({ ok: true });
+    expect(checkFixTimes("9:20", "17:45")).toMatchObject({ ok: false });
+    expect(checkFixTimes("09:20", "25:00")).toMatchObject({ ok: false });
+    expect(checkFixTimes("17:45", "09:20")).toMatchObject({ ok: false, error: "Check-out must be after check-in." });
+    expect(checkFixTimes("17:45", "17:45")).toMatchObject({ ok: false });
+    expect(checkFixTimes("00:30", "17:00")).toMatchObject({ ok: false }); // 16.5 hours
+  });
+
+  it("prefills the normal working hours", () => {
+    expect(defaultFixTimes(policy)).toEqual({ in: "09:30", out: "17:30" });
   });
 });

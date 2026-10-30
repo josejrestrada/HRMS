@@ -28,6 +28,11 @@ describe("attendance functions refuse a missing actor without touching the datab
     ["punch", () => attendance.punch(null)],
     ["getDaySheet", () => attendance.getDaySheet(null, "2026-10-30")],
     ["getDaySummary", () => attendance.getDaySummary(null, "2026-10-30")],
+    ["requestRegularizations", () => attendance.requestRegularizations(null, { reason: "forgot", items: [{ date: "2026-10-05", in: "09:30", out: "17:30" }] })],
+    ["cancelRegularization", () => attendance.cancelRegularization(null, "7b0c8c52-3a52-4d7c-9d2e-0f6f3f3f3f3f")],
+    ["decideRegularizations", () => attendance.decideRegularizations(null, { requestIds: ["7b0c8c52-3a52-4d7c-9d2e-0f6f3f3f3f3f"], decision: "approve" })],
+    ["listRegularizationApprovals", () => attendance.listRegularizationApprovals(null)],
+    ["getAttendanceApprovalScope", () => attendance.getAttendanceApprovalScope(null)],
   ])("%s", async (_n, run) => {
     await expect(run()).rejects.toBeInstanceOf(ForbiddenError);
     expect(queryMock).not.toHaveBeenCalled();
@@ -74,5 +79,27 @@ describe("getMyAttendance validates the month", () => {
   it("refuses an impossible month without querying", async () => {
     await expect(attendance.getMyAttendance(employee, 2026, 13)).rejects.toThrow(/valid month/);
     expect(queryMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("regularization transaction functions also check the actor", () => {
+  const tx = { query: vi.fn() };
+  it.each([
+    ["requestRegularizationsTx", () => attendance.requestRegularizationsTx(tx, null, { reason: "forgot", items: [{ date: "2026-10-05", in: "09:30", out: "17:30" }] })],
+    ["cancelRegularizationTx", () => attendance.cancelRegularizationTx(tx, null, "r1")],
+    ["decideRegularizationsTx", () => attendance.decideRegularizationsTx(tx, null, { requestIds: ["r1"], decision: "approve" })],
+  ])("%s", async (_n, run) => {
+    await expect(run()).rejects.toBeInstanceOf(ForbiddenError);
+    expect(tx.query).not.toHaveBeenCalled();
+  });
+});
+
+describe("an ordinary employee with no reports sees no approvals", () => {
+  it("lists nothing and cannot approve", async () => {
+    // getDirectReportIds finds nobody, so no query for requests is made.
+    queryMock.mockResolvedValueOnce([]);
+    expect(await attendance.listRegularizationApprovals(employee)).toEqual([]);
+    queryMock.mockResolvedValueOnce([]);
+    expect(await attendance.getAttendanceApprovalScope(employee)).toEqual({ canApprove: false, pending: 0 });
   });
 });

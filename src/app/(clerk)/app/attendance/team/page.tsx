@@ -1,6 +1,6 @@
 import { getCurrentActor } from "@/shared/auth";
 import { todayIST } from "@/shared/dates";
-import { getDaySheet } from "@/modules/attendance/data";
+import { getAttendanceApprovalScope, getDaySheet } from "@/modules/attendance/data";
 import { NoAccess, NotLinked } from "../../_components/ui";
 import { TeamView } from "../_components/team-view";
 
@@ -15,6 +15,6 @@ export default async function TeamAttendancePage({ searchParams }: { searchParam
   const today = todayIST();
   const requested = first(sp.date) ?? "";
   const date = /^\d{4}-\d{2}-\d{2}$/.test(requested) && requested <= today ? requested : today;
-  const sheet = await getDaySheet(actor, date);
-  return <TeamView sheet={sheet} today={today} />;
+  const [sheet, scope] = await Promise.all([getDaySheet(actor, date), getAttendanceApprovalScope(actor)]);
+  return <TeamView sheet={sheet} today={today} pending={scope.pending} />;
 }

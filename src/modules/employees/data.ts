@@ -577,3 +577,23 @@ export async function getSelfFacts(actor: Actor | null): Promise<{ gender: strin
   );
   return rows[0] ? { gender: rows[0].gender, joiningDate: rows[0].joining_date } : null;
 }
+
+/** Ids of the active employees who report directly to the signed-in person today. */
+export async function getDirectReportIds(actor: Actor | null, q: Queryable = { query }): Promise<string[]> {
+  requireRole(actor, "employee");
+  const rows = await q.query<{ id: string }>(
+    `select e.id from employment_assignment a join employee e on e.id = a.employee_id
+      where a.manager_id = $1 and a.effective_to is null and e.status = 'active'`,
+    [actor.employeeId],
+  );
+  return rows.map((r) => r.id);
+}
+
+/** True if `managerId` is the current manager of `employeeId`. */
+export async function isCurrentManagerOf(q: Queryable, managerId: string, employeeId: string): Promise<boolean> {
+  const rows = await q.query(
+    "select 1 from employment_assignment where employee_id = $1 and manager_id = $2 and effective_to is null",
+    [employeeId, managerId],
+  );
+  return rows.length > 0;
+}

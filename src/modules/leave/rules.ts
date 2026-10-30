@@ -175,16 +175,7 @@ export function checkApplication(i: {
   return { ok: true, days: i.days, heldDays, lopDays: i.days - heldDays, certificateRequired };
 }
 
-/** R20, R31: who may approve or reject a request. */
-export function canDecide(p: {
-  actorEmployeeId: string;
-  actorIsHrAdmin: boolean;
-  actorIsManagerOfRequester: boolean;
-  requesterEmployeeId: string;
-}): boolean {
-  if (p.actorEmployeeId === p.requesterEmployeeId) return false;
-  return p.actorIsHrAdmin || p.actorIsManagerOfRequester;
-}
+export { canDecide } from "@/shared/approvals";
 
 /** R20: the owner cancels their own request, but past approved leave can only be cancelled by HR. */
 export function canCancel(p: {

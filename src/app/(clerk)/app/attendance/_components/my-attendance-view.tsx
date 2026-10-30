@@ -2,8 +2,9 @@ import Link from "next/link";
 import { formatDate, weekdayName } from "@/shared/dates";
 import type { MyAttendance } from "@/modules/attendance/data";
 import { formatMinutes } from "@/modules/attendance/rules";
-import { punchAction } from "../actions";
+import { cancelRegularizationAction, punchAction, requestRegularizationAction } from "../actions";
 import { AttendanceTabs } from "./attendance-tabs";
+import { FixForm } from "./fix-form";
 import { STATUS_INFO, StatusChip } from "./status";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -12,7 +13,20 @@ function monthLink(year: number, month: number) {
   return `/app/attendance?m=${year}-${String(month).padStart(2, "0")}`;
 }
 
-export function MyAttendanceView(props: { data: MyAttendance; isHr: boolean; saved?: string; time?: string; error?: string }) {
+const FIX_SAVED: Record<string, string> = {
+  fixcancelled: "The request was cancelled.",
+};
+
+export function MyAttendanceView(props: {
+  data: MyAttendance;
+  isHr: boolean;
+  canApprove?: boolean;
+  pendingApprovals?: number;
+  saved?: string;
+  time?: string;
+  count?: string;
+  error?: string;
+}) {
   const { data } = props;
   const prev = data.month === 1 ? { y: data.year - 1, m: 12 } : { y: data.year, m: data.month - 1 };
   const next = data.month === 12 ? { y: data.year + 1, m: 1 } : { y: data.year, m: data.month + 1 };
@@ -28,13 +42,19 @@ export function MyAttendanceView(props: { data: MyAttendance; isHr: boolean; sav
         <h1>Attendance</h1>
         <p className="muted">Your check-ins and how each day counts.</p>
       </div>
-      <AttendanceTabs current="my" isHr={props.isHr} />
+      <AttendanceTabs current="my" isHr={props.isHr} canApprove={props.canApprove} pending={props.pendingApprovals} />
 
-      {props.saved ? (
+      {props.saved === "in" || props.saved === "out" ? (
         <div className="alert alert-ok" role="status">
           You checked {props.saved === "in" ? "in" : "out"} at {props.time}.
         </div>
       ) : null}
+      {props.saved === "fix" ? (
+        <div className="alert alert-ok" role="status">
+          {props.count === "1" ? "Your fix was" : `Your ${props.count ?? ""} fixes were`} sent for approval.
+        </div>
+      ) : null}
+      {props.saved && FIX_SAVED[props.saved] ? <div className="alert alert-ok" role="status">{FIX_SAVED[props.saved]}</div> : null}
       {props.error ? <div className="alert alert-error" role="alert">{props.error}</div> : null}
 
       <section className="panel punch-card" aria-labelledby="p-today">
@@ -117,6 +137,8 @@ export function MyAttendanceView(props: { data: MyAttendance; isHr: boolean; sav
                   </span>
                 ) : null}
                 {d.late ? <span className="cal-late">Late</span> : null}
+                {d.fixPending ? <span className="cal-late">Fix sent</span> : null}
+                {d.regularized ? <span className="cal-times">Fixed</span> : null}
               </div>
             );
           })}
@@ -126,33 +148,77 @@ export function MyAttendanceView(props: { data: MyAttendance; isHr: boolean; sav
       <section className="panel" aria-labelledby="p-fix">
         <div className="panel-head">
           <h2 id="p-fix">Days to fix</h2>
-          <span className="chip">{s.needsAction.length}</span>
+          <span className="chip">{data.fixable.length + data.pastDeadline.length}</span>
         </div>
-        {s.needsAction.length === 0 ? (
-          <p className="empty">Nothing needs fixing this month.</p>
-        ) : (
-          <>
+        {data.fixable.length === 0 && data.pastDeadline.length === 0 ? (
+          <p className="empty">Nothing needs fixing in this month.</p>
+        ) : null}
+        {data.fixable.length > 0 ? (
+          <FixForm
+            days={data.fixable.map((d) => ({ date: d.date, note: d.note }))}
+            defaults={data.defaults}
+            action={requestRegularizationAction}
+            deadlineText={`Days from this month can be fixed at any time. Days from last month can be fixed until the ${data.policy.regularizeUntilDay}th. Days that are not fixed in time count as unpaid.`}
+          />
+        ) : null}
+        {data.pastDeadline.length > 0 ? (
+          <div className="past-deadline">
+            <p className="preview-warn">These days are past the deadline and now count as unpaid. Please talk to HR.</p>
             <ul className="rows">
-              {data.days
-                .filter((d) => d.needsAction)
-                .map((d) => (
-                  <li key={d.date}>
-                    <span>
-                      {weekdayName(d.date).slice(0, 3)} {formatDate(d.date)}
-                      <span className="sub">
-                        {d.note}
-                        {d.workedMinutes !== null && d.status === "absent" ? "" : ""}
-                      </span>
-                    </span>
-                    <StatusChip status={d.status} />
-                  </li>
-                ))}
+              {data.pastDeadline.map((d) => (
+                <li key={d.date}>
+                  <span>
+                    {weekdayName(d.date).slice(0, 3)} {formatDate(d.date)}
+                    <span className="sub">{d.note}</span>
+                  </span>
+                </li>
+              ))}
             </ul>
-            <p className="hint">
-              Fixing a missed or short day (regularization) is coming next. Until then, please tell HR about any day that is wrong. Days not fixed by the
-              {" "}{data.policy.regularizeUntilDay}th of next month will count as unpaid.
-            </p>
-          </>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="panel" aria-labelledby="p-fixes">
+        <div className="panel-head">
+          <h2 id="p-fixes">My fixes</h2>
+        </div>
+        {data.requests.length === 0 ? (
+          <p className="empty">You have not sent any fixes yet.</p>
+        ) : (
+          <div className="table-wrap">
+            <table className="people-table">
+              <thead>
+                <tr>
+                  <th scope="col">Day</th>
+                  <th scope="col">Times</th>
+                  <th scope="col">Status</th>
+                  <th scope="col"><span className="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.requests.map((r) => (
+                  <tr key={r.id}>
+                    <td data-label="Day">{weekdayName(r.date).slice(0, 3)} {formatDate(r.date)}</td>
+                    <td data-label="Times">{r.inTime} to {r.outTime}</td>
+                    <td data-label="Status">
+                      <span className={r.status === "approved" ? "chip chip-ok" : r.status === "pending" ? "chip chip-warn" : r.status === "rejected" ? "chip chip-bad" : "chip"}>
+                        {r.status === "pending" ? "Waiting for approval" : r.status[0].toUpperCase() + r.status.slice(1)}
+                      </span>
+                      {r.decisionNote ? <span className="sub">{r.decisionNote}</span> : null}
+                    </td>
+                    <td data-label="">
+                      {r.canCancel ? (
+                        <form action={cancelRegularizationAction}>
+                          <input type="hidden" name="requestId" value={r.id} />
+                          <button type="submit" className="btn btn-secondary btn-small">Cancel</button>
+                        </form>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </>

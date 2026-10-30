@@ -1,12 +1,18 @@
 import "server-only";
 import { query, transaction, type Queryable } from "@/shared/db";
 import { DomainError } from "@/shared/errors";
-import { requireRole, type Actor } from "@/shared/roles";
-import { addDays, todayIST } from "@/shared/dates";
-import { getWorkforce, type WorkforceRow } from "@/modules/employees/data";
+import { recordAudit } from "@/shared/audit";
+import { ForbiddenError, requireRole, type Actor } from "@/shared/roles";
+import { canDecide } from "@/shared/approvals";
+import { addDays, formatDate, todayIST } from "@/shared/dates";
+import { getDirectReportIds, getWorkforce, isCurrentManagerOf, type WorkforceRow } from "@/modules/employees/data";
 import { getCalendarFacts } from "@/modules/leave/data";
 import {
+  canRegularize,
+  checkFixTimes,
+  defaultFixTimes,
   deriveDay,
+  isFixable,
   nextPunchDirection,
   summarizeMonth,
   type DayResult,
@@ -47,6 +53,36 @@ export type MyAttendance = {
   todayIn: string | null;
   todayOut: string | null;
   canPunch: boolean;
+  /** Days that need action and can still be fixed, with the times to prefill. */
+  fixable: { date: string; status: string; note: string | null }[];
+  /** Days that need action but are past the deadline: they count as unpaid (R55). */
+  pastDeadline: { date: string; note: string | null }[];
+  defaults: { in: string; out: string };
+  requests: MyRegularization[];
+};
+
+export type MyRegularization = {
+  id: string;
+  date: string;
+  inTime: string;
+  outTime: string;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  reason: string;
+  decisionNote: string | null;
+  canCancel: boolean;
+};
+
+export type RegularizationApproval = {
+  id: string;
+  batchId: string;
+  employeeId: string;
+  employeeCode: string;
+  employeeName: string;
+  date: string;
+  inTime: string;
+  outTime: string;
+  reason: string;
+  waitingDays: number;
 };
 
 export type DaySheet = {
@@ -92,7 +128,7 @@ async function deriveRange(
   const ids = workforce.map((w) => w.id);
   const locationIds = [...new Set(workforce.map((w) => w.locationId).filter((l): l is string => !!l))];
 
-  const [policyRows, punchRows, facts] = await Promise.all([
+  const [policyRows, punchRows, facts, fixRows] = await Promise.all([
     q.query<{
       location_id: string;
       work_start: string;
@@ -119,7 +155,17 @@ async function deriveRange(
           [ids, from, to],
         ),
     getCalendarFacts(actor, { employeeIds, locationIds, from, to }, q),
+    ids.length === 0
+      ? Promise.resolve([] as { employee_id: string; d: string; in_time: string; out_time: string; status: "pending" | "approved" }[])
+      : q.query<{ employee_id: string; d: string; in_time: string; out_time: string; status: "pending" | "approved" }>(
+          `select employee_id, work_date::text as d, to_char(in_time, 'HH24:MI') as in_time,
+                  to_char(out_time, 'HH24:MI') as out_time, status
+             from regularization
+            where employee_id = any($1::uuid[]) and status in ('pending', 'approved') and work_date between $2::date and $3::date`,
+          [ids, from, to],
+        ),
   ]);
+  const fixBy = new Map(fixRows.map((f) => [`${f.employee_id}|${f.d}`, { in: f.in_time, out: f.out_time, status: f.status }]));
 
   const policies = new Map<string, Policy>(
     policyRows.map((r) => [
@@ -161,6 +207,7 @@ async function deriveRange(
           wfh: false, // work from home requests arrive in the next slice
           punches: punchesBy.get(`${w.id}|${date}`) ?? [],
           policy,
+          regularization: fixBy.get(`${w.id}|${date}`) ?? null,
         });
       }),
     );
@@ -191,6 +238,15 @@ export async function getMyAttendance(actor: Actor | null, year: number, month: 
   const ins = punches.filter((p) => p.direction === "in").map((p) => p.time);
   const outs = punches.filter((p) => p.direction === "out").map((p) => p.time);
 
+  const fixable: MyAttendance["fixable"] = [];
+  const pastDeadline: MyAttendance["pastDeadline"] = [];
+  for (const d of list) {
+    if (!isFixable(d)) continue;
+    const ok = canRegularize({ date: d.date, today, regularizeUntilDay: policy.regularizeUntilDay });
+    if (ok.ok) fixable.push({ date: d.date, status: d.status, note: d.note });
+    else if (d.date < today) pastDeadline.push({ date: d.date, note: d.note });
+  }
+
   return {
     today,
     year,
@@ -202,6 +258,10 @@ export async function getMyAttendance(actor: Actor | null, year: number, month: 
     todayIn: ins[0] ?? null,
     todayOut: outs[outs.length - 1] ?? null,
     canPunch: !!me, // only active employees come back from the workforce lookup
+    fixable,
+    pastDeadline,
+    defaults: defaultFixTimes(policy),
+    requests: await myRegularizations(q, actor.employeeId),
   };
 }
 
@@ -275,4 +335,219 @@ export async function getDaySummary(actor: Actor | null, date: string): Promise<
   };
   const recorded = Object.values(counts).reduce((a, b) => a + b, 0);
   return { total: sheet.rows.length, counts, recorded, notRecorded: sheet.notCheckedIn, offToday: off };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Regularization (R54 to R57)
+// ---------------------------------------------------------------------------------------------
+
+async function myRegularizations(q: Queryable, employeeId: string): Promise<MyRegularization[]> {
+  const rows = await q.query<{
+    id: string;
+    d: string;
+    in_time: string;
+    out_time: string;
+    status: MyRegularization["status"];
+    reason: string;
+    decision_note: string | null;
+  }>(
+    `select id, work_date::text as d, to_char(in_time, 'HH24:MI') as in_time, to_char(out_time, 'HH24:MI') as out_time,
+            status, reason, decision_note
+       from regularization where employee_id = $1 order by work_date desc, created_at desc limit 20`,
+    [employeeId],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    date: r.d,
+    inTime: r.in_time,
+    outTime: r.out_time,
+    status: r.status,
+    reason: r.reason,
+    decisionNote: r.decision_note,
+    canCancel: r.status === "pending",
+  }));
+}
+
+export type RegularizeInput = { reason: string; items: { date: string; in: string; out: string }[] };
+
+/** One request per day, all sharing one reason and one batch (bulk regularization). */
+export async function requestRegularizationsTx(tx: Queryable, actor: Actor | null, input: RegularizeInput): Promise<{ batchId: string; count: number }> {
+  requireEmployee(actor);
+  const today = todayIST();
+  const emp = (await tx.query<{ status: string }>("select status from employee where id = $1 for update", [actor.employeeId]))[0];
+  if (!emp || emp.status !== "active") throw new DomainError("Only active employees can fix attendance.");
+
+  const reason = input.reason.trim();
+  if (reason.length < 3) throw new DomainError("Please give a short reason.");
+  if (input.items.length === 0) throw new DomainError("Tick at least one day to fix.");
+  if (input.items.length > 31) throw new DomainError("You can fix at most 31 days at a time.");
+  const dates = input.items.map((i) => i.date);
+  if (new Set(dates).size !== dates.length) throw new DomainError("The same day was chosen twice.");
+
+  const from = [...dates].sort()[0];
+  const to = [...dates].sort()[dates.length - 1];
+  const { days, policies, workforce } = await deriveRange(actor, [actor.employeeId], from, to, tx);
+  const policy = (workforce[0]?.locationId && policies.get(workforce[0].locationId)) || DEFAULT_POLICY;
+  const mine = new Map((days.get(actor.employeeId) ?? []).map((d) => [d.date, d]));
+
+  for (const item of input.items) {
+    const label = formatDate(item.date);
+    const when = canRegularize({ date: item.date, today, regularizeUntilDay: policy.regularizeUntilDay });
+    if (!when.ok) throw new DomainError(`${label}: ${when.error}`);
+    const times = checkFixTimes(item.in, item.out);
+    if (!times.ok) throw new DomainError(`${label}: ${times.error}`);
+    const day = mine.get(item.date);
+    if (!day || !isFixable(day)) {
+      throw new DomainError(`${label} does not need fixing, or a fix for it has already been sent.`);
+    }
+  }
+
+  const batchId = (await tx.query<{ id: string }>("select gen_random_uuid()::text as id"))[0].id;
+  for (const item of input.items) {
+    await tx.query(
+      `insert into regularization (employee_id, work_date, batch_id, in_time, out_time, reason)
+       values ($1, $2, $3, $4, $5, $6)`,
+      [actor.employeeId, item.date, batchId, item.in, item.out, reason],
+    );
+  }
+  await recordAudit(
+    {
+      actorEmployeeId: actor.employeeId,
+      action: "regularization_requested",
+      entity: "regularization",
+      entityId: batchId,
+      summary: `${input.items.length} ${input.items.length === 1 ? "day" : "days"}: ${[...dates].sort().join(", ")}`,
+    },
+    tx,
+  );
+  return { batchId, count: input.items.length };
+}
+
+export async function requestRegularizations(actor: Actor | null, input: RegularizeInput) {
+  requireEmployee(actor);
+  return transaction((tx) => requestRegularizationsTx(tx, actor, input));
+}
+
+export async function cancelRegularizationTx(tx: Queryable, actor: Actor | null, requestId: string): Promise<void> {
+  requireEmployee(actor);
+  const req = (
+    await tx.query<{ employee_id: string; status: string; d: string }>(
+      "select employee_id, status, work_date::text as d from regularization where id = $1 for update",
+      [requestId],
+    )
+  )[0];
+  if (!req) throw new DomainError("That request was not found.");
+  if (req.employee_id !== actor.employeeId) throw new ForbiddenError("You cannot cancel this request.");
+  if (req.status !== "pending") throw new DomainError("Only a request that is still waiting can be cancelled.");
+  await tx.query("update regularization set status = 'cancelled' where id = $1", [requestId]);
+  await recordAudit({ actorEmployeeId: actor.employeeId, action: "regularization_cancelled", entity: "regularization", entityId: requestId, summary: req.d }, tx);
+}
+
+export async function cancelRegularization(actor: Actor | null, requestId: string) {
+  requireEmployee(actor);
+  return transaction((tx) => cancelRegularizationTx(tx, actor, requestId));
+}
+
+/** Approve or reject one or more days together. All or nothing. */
+export async function decideRegularizationsTx(
+  tx: Queryable,
+  actor: Actor | null,
+  input: { requestIds: string[]; decision: "approve" | "reject"; note?: string },
+): Promise<{ count: number }> {
+  requireEmployee(actor);
+  if (input.requestIds.length === 0) throw new DomainError("Choose at least one request.");
+  const isHr = actor.roles.includes("hr_admin");
+  const dates: string[] = [];
+
+  for (const id of input.requestIds) {
+    const req = (
+      await tx.query<{ employee_id: string; status: string; d: string }>(
+        "select employee_id, status, work_date::text as d from regularization where id = $1 for update",
+        [id],
+      )
+    )[0];
+    if (!req) throw new DomainError("That request was not found.");
+    if (req.status !== "pending") throw new DomainError("A request has already been decided or cancelled.");
+    const allowed = canDecide({
+      actorEmployeeId: actor.employeeId,
+      actorIsHrAdmin: isHr,
+      actorIsManagerOfRequester: await isCurrentManagerOf(tx, actor.employeeId, req.employee_id),
+      requesterEmployeeId: req.employee_id,
+    });
+    if (!allowed) throw new ForbiddenError("You cannot decide this request.");
+    await tx.query(
+      `update regularization set status = $2, approver_id = $3, decided_at = now(), decision_note = $4 where id = $1`,
+      [id, input.decision === "approve" ? "approved" : "rejected", actor.employeeId, input.note ?? null],
+    );
+    dates.push(req.d);
+  }
+  await recordAudit(
+    {
+      actorEmployeeId: actor.employeeId,
+      action: input.decision === "approve" ? "regularization_approved" : "regularization_rejected",
+      entity: "regularization",
+      entityId: input.requestIds[0],
+      summary: `${dates.length} ${dates.length === 1 ? "day" : "days"}: ${dates.sort().join(", ")}`,
+    },
+    tx,
+  );
+  return { count: dates.length };
+}
+
+export async function decideRegularizations(actor: Actor | null, input: { requestIds: string[]; decision: "approve" | "reject"; note?: string }) {
+  requireEmployee(actor);
+  return transaction((tx) => decideRegularizationsTx(tx, actor, input));
+}
+
+/** Pending fixes the signed-in person may decide: direct reports for a manager, everyone for HR (never their own). */
+export async function listRegularizationApprovals(actor: Actor | null, q: Queryable = { query }): Promise<RegularizationApproval[]> {
+  requireEmployee(actor);
+  const isHr = actor.roles.includes("hr_admin");
+  const reportIds = isHr ? null : await getDirectReportIds(actor, q);
+  if (reportIds !== null && reportIds.length === 0) return [];
+  const today = todayIST();
+  const rows = await q.query<{
+    id: string;
+    batch_id: string;
+    employee_id: string;
+    employee_code: string;
+    full_name: string;
+    d: string;
+    in_time: string;
+    out_time: string;
+    reason: string;
+    waiting: number;
+  }>(
+    `select r.id, r.batch_id, e.id as employee_id, e.employee_code, e.full_name, r.work_date::text as d,
+            to_char(r.in_time, 'HH24:MI') as in_time, to_char(r.out_time, 'HH24:MI') as out_time, r.reason,
+            ($3::date - (r.created_at at time zone 'Asia/Kolkata')::date)::int as waiting
+       from regularization r join employee e on e.id = r.employee_id
+      where r.status = 'pending' and e.status = 'active' and e.id <> $1
+        and ($2::uuid[] is null or e.id = any($2::uuid[]))
+      order by r.created_at, r.work_date
+      limit 200`,
+    [actor.employeeId, reportIds, today],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    batchId: r.batch_id,
+    employeeId: r.employee_id,
+    employeeCode: r.employee_code,
+    employeeName: r.full_name,
+    date: r.d,
+    inTime: r.in_time,
+    outTime: r.out_time,
+    reason: r.reason,
+    waitingDays: r.waiting,
+  }));
+}
+
+/** For tabs and navigation: can this person approve attendance fixes, and how many are waiting? */
+export async function getAttendanceApprovalScope(actor: Actor | null): Promise<{ canApprove: boolean; pending: number }> {
+  requireEmployee(actor);
+  const isHr = actor.roles.includes("hr_admin");
+  const reports = isHr ? [] : await getDirectReportIds(actor);
+  const canApprove = isHr || reports.length > 0;
+  if (!canApprove) return { canApprove, pending: 0 };
+  return { canApprove, pending: (await listRegularizationApprovals(actor)).length };
 }

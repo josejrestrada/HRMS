@@ -3,6 +3,7 @@ import { query, transaction, type Queryable } from "@/shared/db";
 import { recordAudit } from "@/shared/audit";
 import { DomainError } from "@/shared/errors";
 import { ForbiddenError, requireRole, type Actor } from "@/shared/roles";
+import { canDecide } from "@/shared/approvals";
 import { addDays, addMonths, formatDate, todayIST } from "@/shared/dates";
 import { getSelfFacts } from "@/modules/employees/data";
 import type { ApplyLeaveInput, CompoffInput, DecisionInput, MaternityInput, PaternityInput } from "./schemas";
@@ -11,7 +12,6 @@ import {
   accrualMonths,
   allocateCompoff,
   canCancel,
-  canDecide,
   checkApplication,
   checkCompoff,
   checkMaternity,

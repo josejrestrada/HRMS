@@ -4,7 +4,7 @@ import { Avatar, displayName } from "../../_components/ui";
 import { AttendanceTabs } from "./attendance-tabs";
 import { STATUS_INFO, StatusChip } from "./status";
 
-export function TeamView({ sheet, today }: { sheet: DaySheet; today: string }) {
+export function TeamView({ sheet, today, pending }: { sheet: DaySheet; today: string; pending?: number }) {
   const order = ["present", "wfh", "half_day", "leave", "absent", "missed_punch", "weekly_off", "holiday"] as const;
   return (
     <>
@@ -15,7 +15,7 @@ export function TeamView({ sheet, today }: { sheet: DaySheet; today: string }) {
           {sheet.date === today ? " (today)" : ""}
         </p>
       </div>
-      <AttendanceTabs current="team" isHr />
+      <AttendanceTabs current="team" isHr canApprove pending={pending} />
 
       <form method="get" action="/app/attendance/team" className="filters" aria-label="Choose a date">
         <div className="filter">

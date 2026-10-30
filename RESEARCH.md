@@ -156,6 +156,12 @@ These are my own design choices, informed by the research above. The statutory n
 - **R52.** Unused comp-off days are unavailable after they expire. An HR action writes the expiry to the ledger. Comp-off is not part of year-end processing.
 - **R53.** An approved comp-off request cannot be cancelled by the employee. If approved comp-off leave is cancelled, the days return only to credits that have not expired.
 
+### Clarifications from building regularization (see docs/decisions.md)
+- **R54.** Only a past working day that needs action (a missed punch, no check-in, or a short day) can be regularized. Weekly offs, holidays, leave, work from home, today and future days cannot.
+- **R55.** "By the 5th of the next month" (R28) means a request can be made up to and including that day. After it the day counts as unpaid and the employee contacts HR.
+- **R56.** Approved times replace that day's punches only for working out its status; the raw punches are never changed. The fixed day is then judged by R27, so late marks are recomputed from the approved check-in time.
+- **R57.** Regularization is approved under the same rules as leave (R20, R31). A request still waiting does not fix the day.
+
 ### Still to resolve
 - Which Goa Act applies now (1973 or 2025) and its commencement date, and whether the plant in Verna is also covered by the Factories Act.
 - The official Goa 2026 holiday notification, to replace the tentative list in section 6.

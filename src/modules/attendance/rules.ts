@@ -25,6 +25,9 @@ export type Policy = {
 
 export type PunchTime = { time: string; direction: "in" | "out" };
 
+/** An employee's correction of a day's check-in and check-out (R54 to R57). */
+export type Regularization = { in: string; out: string; status: "pending" | "approved" };
+
 export type DayInput = {
   date: string;
   today: string;
@@ -34,6 +37,7 @@ export type DayInput = {
   wfh: boolean;
   punches: PunchTime[];
   policy: Policy;
+  regularization?: Regularization | null;
 };
 
 export type DayResult = {
@@ -46,6 +50,10 @@ export type DayResult = {
   needsAction: boolean;
   /** Today, not finished yet: the status may still change. */
   provisional: boolean;
+  /** The times come from an approved regularization, not from raw punches. */
+  regularized: boolean;
+  /** A regularization has been sent and is waiting for approval. */
+  fixPending: boolean;
   note: string | null;
 };
 
@@ -87,7 +95,13 @@ export function isLate(firstIn: string | null, policy: Policy): boolean {
 
 /** The status of one day (R27, R43, R44). */
 export function deriveDay(i: DayInput): DayResult {
-  const { firstIn, lastOut, workedMinutes } = summarizePunches(i.punches);
+  // An approved regularization replaces the day's punches for working out its status; the raw
+  // punches themselves are never changed (R56).
+  const approved = i.regularization?.status === "approved" ? i.regularization : null;
+  const punches: PunchTime[] = approved
+    ? [{ time: approved.in, direction: "in" }, { time: approved.out, direction: "out" }]
+    : i.punches;
+  const { firstIn, lastOut, workedMinutes } = summarizePunches(punches);
   const result = (status: DayStatus, extra: Partial<DayResult> = {}): DayResult => ({
     date: i.date,
     status,
@@ -97,6 +111,8 @@ export function deriveDay(i: DayInput): DayResult {
     late: false,
     needsAction: false,
     provisional: false,
+    regularized: !!approved,
+    fixPending: i.regularization?.status === "pending",
     note: null,
     ...extra,
   });
@@ -127,9 +143,13 @@ export function deriveDay(i: DayInput): DayResult {
   }
 
   const minutes = workedMinutes ?? 0;
-  if (minutes >= i.policy.fullDayMinutes) return result("present", { late });
-  if (minutes >= i.policy.halfDayMinutes) return result("half_day", { late, note: `Worked ${formatMinutes(minutes)}` });
-  return result("absent", { late, needsAction: true, note: `Worked only ${formatMinutes(minutes)}` });
+  // After an approved fix the day is decided: it no longer needs action, even if the hours are short.
+  const needsFix = !approved;
+  if (minutes >= i.policy.fullDayMinutes) return result("present", { late, note: approved ? "Regularized" : null });
+  if (minutes >= i.policy.halfDayMinutes) {
+    return result("half_day", { late, note: approved ? "Regularized" : `Worked ${formatMinutes(minutes)}` });
+  }
+  return result("absent", { late, needsAction: needsFix, note: approved ? "Regularized" : `Worked only ${formatMinutes(minutes)}` });
 }
 
 export type MonthSummary = {
@@ -162,4 +182,52 @@ export function summarizeMonth(days: DayResult[], policy: Policy): MonthSummary 
     if (d.needsAction) needsAction.push(d.date);
   }
   return { counts, lateMarks, lateLimit: policy.lateMarksPerDeduction, needsAction };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Regularization (R54 to R57)
+// ---------------------------------------------------------------------------------------------
+
+const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+export const MAX_FIX_MINUTES = 16 * 60;
+
+export type RegularizeCheck = { ok: true } | { ok: false; error: string };
+
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/** R54, R55: which days can still be fixed, and until when. */
+export function canRegularize(i: { date: string; today: string; regularizeUntilDay: number }): RegularizeCheck {
+  if (i.date > i.today) return { ok: false, error: "That date is in the future." };
+  if (i.date === i.today) return { ok: false, error: "Today is still in progress. You can fix it from tomorrow." };
+
+  const [dy, dm] = i.date.split("-").map(Number);
+  const [ty, tm, td] = i.today.split("-").map(Number);
+  const monthsApart = (ty - dy) * 12 + (tm - dm);
+  if (monthsApart === 0) return { ok: true };
+  if (monthsApart === 1 && td <= i.regularizeUntilDay) return { ok: true };
+  return {
+    ok: false,
+    error: `The deadline to fix ${MONTH_NAMES[dm - 1]} days was the ${i.regularizeUntilDay}th of the next month. That day now counts as unpaid. Please talk to HR.`,
+  };
+}
+
+/** The statuses a day must have (before any fix) to be worth regularizing. */
+export function isFixable(day: Pick<DayResult, "status" | "needsAction" | "fixPending" | "regularized">): boolean {
+  return day.needsAction && !day.fixPending && !day.regularized;
+}
+
+export function checkFixTimes(inTime: string, outTime: string): RegularizeCheck {
+  if (!TIME.test(inTime) || !TIME.test(outTime)) return { ok: false, error: "Enter times like 09:30 and 17:45." };
+  const span = toMinutes(outTime) - toMinutes(inTime);
+  if (span <= 0) return { ok: false, error: "Check-out must be after check-in." };
+  if (span > MAX_FIX_MINUTES) return { ok: false, error: "That is longer than 16 hours. Please check the times." };
+  return { ok: true };
+}
+
+/** Starting times for the fix form: normal start, and start plus a full day. */
+export function defaultFixTimes(policy: Policy): { in: string; out: string } {
+  const start = toMinutes(policy.workStart.slice(0, 5));
+  const end = Math.min(start + policy.fullDayMinutes, 23 * 60 + 59);
+  const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  return { in: hhmm(start), out: hhmm(end) };
 }

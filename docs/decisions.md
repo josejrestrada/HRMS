@@ -31,6 +31,18 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## Accepted
 
+## 2026-10-30 - Attendance: regularization (single and bulk)
+- **Status:** Accepted (2026-10-30, owner: "next: regularization"). Implements R28 and the "Days to fix" part of DESIGN 4.6 and 4.7.
+- **What an employee can do:** from **My attendance**, tick one or more days that need fixing (a missed check-out, no check-in, or a short day), type the real check-in and check-out time for each, give **one reason for all of them**, and send once. Each day becomes its own request, grouped by a shared batch, so a manager can approve a whole batch together or a single day.
+- **Which days:** only past working days that are flagged as needing action. Weekly offs, holidays, leave and work from home cannot be regularized, and neither can today (the day is still in progress) or the future.
+- **Deadline (R28):** a day in the current month can be fixed any time. A day in the previous month can be fixed until the `regularize_until_day` of this month (5 by default, from `attendance_policy`). After that the day counts as unpaid and the employee is told to talk to HR. HR entering a fix on someone's behalf is not in this slice.
+- **Approval:** same rules as leave (R20, R31): a manager approves their direct reports, an HR admin can approve anyone except themself, nobody approves their own. Rejecting needs a reason. Approving and rejecting can be done for one day or for a whole batch at once. The shared rule now lives in `src/shared/approvals.ts`.
+- **What approval does:** the approved check-in and check-out times replace that day's punches when the day's status is worked out. **The raw punches are never touched** (R28). The day is then judged by the normal rules, so a fixed 09:20 to 17:45 day becomes present with no late mark.
+- **Pending requests:** the day keeps its current status, shows "Fix waiting for approval" and is no longer in the "Days to fix" list. A rejected or cancelled request puts the day back in the list (until the deadline).
+- **Rules in the database:** one open (pending or approved) request per employee per day; check-out later than check-in; nobody approves their own; a decided request can never be changed or deleted.
+- **Not in this slice:** the month lock (the frozen copy and the "unfixed days become unpaid" step), work-from-home requests, HR entering a fix on someone's behalf, fixing late arrivals that are otherwise complete days, and an email when a request is decided.
+- **Clarifications added to RESEARCH.md as R54 to R57.**
+
 ## 2026-10-31 - Leave: maternity, paternity and comp-off (R9 to R11, R24)
 - **Status:** Accepted (2026-10-31, owner: "continue with the rest of leave"). Finishes the leave types left out of the first Leave slice.
 - **Maternity (R9):**

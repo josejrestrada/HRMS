@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
-import type { DaySheet, MyAttendance } from "@/modules/attendance/data";
-import { deriveDay, summarizeMonth, type DayResult, type Policy, type PunchTime } from "@/modules/attendance/rules";
+import type { DaySheet, MyAttendance, RegularizationApproval } from "@/modules/attendance/data";
+import { defaultFixTimes, deriveDay, isFixable, summarizeMonth, type DayResult, type Policy, type PunchTime } from "@/modules/attendance/rules";
 import { MyAttendanceView } from "../../(clerk)/app/attendance/_components/my-attendance-view";
+import { AttendanceApprovalsView } from "../../(clerk)/app/attendance/_components/approvals-view";
 import { TeamView } from "../../(clerk)/app/attendance/_components/team-view";
 
 // Development-only design preview with made-up punches. It reads no database and no session, and it
@@ -39,6 +40,7 @@ const days: DayResult[] = Array.from({ length: 31 }, (_, i) => {
     wfh: date === "2026-10-26",
     punches: punchesByDate[date] ?? [],
     policy,
+    regularization: date === "2026-10-08" ? { in: "09:30", out: "17:30", status: "pending" as const } : date === "2026-10-05" ? { in: "09:25", out: "18:30", status: "approved" as const } : null,
   });
 });
 
@@ -53,7 +55,21 @@ const my: MyAttendance = {
   todayIn: "09:24",
   todayOut: null,
   canPunch: true,
+  fixable: days.filter((d) => isFixable(d)).map((d) => ({ date: d.date, status: d.status, note: d.note })),
+  pastDeadline: [],
+  defaults: defaultFixTimes(policy),
+  requests: [
+    { id: "q3", date: "2026-10-08", inTime: "09:30", outTime: "17:30", status: "pending", reason: "Machine was down", decisionNote: null, canCancel: true },
+    { id: "q2", date: "2026-10-05", inTime: "09:25", outTime: "18:30", status: "approved", reason: "Forgot to check out", decisionNote: null, canCancel: false },
+    { id: "q1", date: "2026-09-29", inTime: "09:30", outTime: "17:30", status: "rejected", reason: "Forgot", decisionNote: "No record of you being on site that day.", canCancel: false },
+  ],
 };
+
+const approvals: RegularizationApproval[] = [
+  { id: "a1", batchId: "b1", employeeId: "e1", employeeCode: "KCF0016", employeeName: "Nikhil Mhambre", date: "2026-10-07", inTime: "09:30", outTime: "17:30", reason: "Forgot to check out", waitingDays: 1 },
+  { id: "a2", batchId: "b1", employeeId: "e1", employeeCode: "KCF0016", employeeName: "Nikhil Mhambre", date: "2026-10-08", inTime: "09:30", outTime: "17:30", reason: "Forgot to check out", waitingDays: 1 },
+  { id: "a3", batchId: "b2", employeeId: "e2", employeeCode: "KCF0011", employeeName: "Sneha Pednekar", date: "2026-10-14", inTime: "09:45", outTime: "18:00", reason: "Scanner not working", waitingDays: 0 },
+];
 
 const people = [
   ["KCF0001", "Asha Naik", "Finance", "Panaji", io("09:20", "17:40")],
@@ -86,7 +102,13 @@ export default async function AttendancePreview({ searchParams }: { searchParams
     <div className="app-shell">
       <div className="app-body">
         <main id="main" className="app-main">
-          {view === "team" ? <TeamView sheet={sheet} today={TODAY} /> : <MyAttendanceView data={my} isHr saved="in" time="09:24" />}
+          {view === "team" ? (
+            <TeamView sheet={sheet} today={TODAY} pending={3} />
+          ) : view === "approvals" ? (
+            <AttendanceApprovalsView rows={approvals} isHr saved="approved" count="2" />
+          ) : (
+            <MyAttendanceView data={my} isHr canApprove pendingApprovals={3} saved="fix" count="2" />
+          )}
         </main>
       </div>
     </div>
