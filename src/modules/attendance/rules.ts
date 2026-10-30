@@ -285,3 +285,18 @@ export function canLockMonth(i: { today: string; year: number; month: number }):
 }
 
 export { MONTH_NAMES };
+
+// ---------------------------------------------------------------------------------------------
+// Which assignment applies on a day (R63)
+// ---------------------------------------------------------------------------------------------
+
+export type Span = { from: string; to: string | null };
+
+/** The span effective on `date`, or null if there is none. If spans overlap, the latest start wins. */
+export function spanAt<T extends Span>(spans: T[], date: string): T | null {
+  let best: T | null = null;
+  for (const s of spans) {
+    if (s.from <= date && (s.to === null || s.to >= date) && (best === null || s.from > best.from)) best = s;
+  }
+  return best;
+}

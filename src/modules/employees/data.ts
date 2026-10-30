@@ -610,3 +610,54 @@ export async function isCurrentManagerOf(q: Queryable, managerId: string, employ
   );
   return rows.length > 0;
 }
+
+/** One stretch of an employee's job assignment: where they worked and which weekly offs applied. */
+export type AssignmentSpan = {
+  employeeId: string;
+  from: string;
+  to: string | null;
+  locationId: string;
+  locationName: string;
+  weeklyOffDays: number[];
+};
+
+/**
+ * Every assignment that overlaps [from, to], so callers can pick the one effective on each day
+ * (R63). HR can ask about everyone (`null`); anyone else only about themself.
+ */
+export async function getAssignmentSpans(
+  actor: Actor | null,
+  employeeIds: string[] | null,
+  from: string,
+  to: string,
+  q: Queryable = { query },
+): Promise<AssignmentSpan[]> {
+  requireRole(actor, "employee");
+  if (employeeIds === null) requireRole(actor, "hr_admin");
+  else if (!actor.roles.includes("hr_admin") && employeeIds.some((id) => id !== actor.employeeId)) {
+    throw new ForbiddenError();
+  }
+  const rows = await q.query<{
+    employee_id: string;
+    effective_from: string;
+    effective_to: string | null;
+    location_id: string;
+    location_name: string;
+    weekly_off_days: number[] | null;
+  }>(
+    `select a.employee_id, a.effective_from::text, a.effective_to::text, l.id as location_id, l.name as location_name, l.weekly_off_days
+       from employment_assignment a join location l on l.id = a.location_id
+      where a.effective_from <= $3::date and (a.effective_to is null or a.effective_to >= $2::date)
+        and ($1::uuid[] is null or a.employee_id = any($1::uuid[]))
+      order by a.employee_id, a.effective_from`,
+    [employeeIds, from, to],
+  );
+  return rows.map((r) => ({
+    employeeId: r.employee_id,
+    from: r.effective_from,
+    to: r.effective_to,
+    locationId: r.location_id,
+    locationName: r.location_name,
+    weeklyOffDays: r.weekly_off_days ?? [0, 6],
+  }));
+}

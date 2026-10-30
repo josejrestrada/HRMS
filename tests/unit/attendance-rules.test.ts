@@ -7,6 +7,7 @@ import {
   deriveDay,
   freezeDay,
   isUnpaidFrozen,
+  spanAt,
   formatMinutes,
   isFixable,
   isLate,
@@ -301,5 +302,29 @@ describe("canLockMonth (R58)", () => {
 
   it("explains itself", () => {
     expect((canLockMonth({ today: "2026-10-30", year: 2026, month: 10 }) as { error: string }).error).toContain("October 2026");
+  });
+});
+
+describe("spanAt (R63)", () => {
+  const spans = [
+    { id: "pnj", from: "2024-01-01", to: "2025-03-14" },
+    { id: "vrn", from: "2025-03-15", to: null },
+  ];
+
+  it("picks the assignment effective on the day, including the boundaries", () => {
+    expect(spanAt(spans, "2025-03-14")?.id).toBe("pnj");
+    expect(spanAt(spans, "2025-03-15")?.id).toBe("vrn");
+    expect(spanAt(spans, "2030-01-01")?.id).toBe("vrn");
+    expect(spanAt(spans, "2024-06-01")?.id).toBe("pnj");
+  });
+
+  it("returns null before the first assignment or in a gap", () => {
+    expect(spanAt(spans, "2023-12-31")).toBeNull();
+    expect(spanAt([{ id: "a", from: "2025-03-10", to: "2025-03-12" }, { id: "b", from: "2025-03-20", to: null }], "2025-03-15")).toBeNull();
+    expect(spanAt([], "2025-03-15")).toBeNull();
+  });
+
+  it("lets the latest start win if two spans overlap", () => {
+    expect(spanAt([{ id: "old", from: "2025-01-01", to: null }, { id: "new", from: "2025-03-01", to: null }], "2025-03-05")?.id).toBe("new");
   });
 });

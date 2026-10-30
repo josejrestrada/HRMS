@@ -31,6 +31,15 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## Accepted
 
+## 2026-10-31 - Review fix: attendance calendar is resolved day by day
+- **Status:** Accepted (2026-10-31, owner: "fix only finding 1" of the review).
+- **The bug:** attendance looked up each person's location, weekly offs and policy once, for the **first day** of the period. Someone who joined on the 10th had no assignment on the 1st, so they got default weekly offs, no holidays and the default policy for the whole month; a holiday then showed as "absent, no check-in" and the month lock stored it as unpaid. A mid-month transfer used the old location for the whole month. My attendance, Team today and the month lock were all affected.
+- **The fix:** weekly offs, holidays and the attendance policy are now taken **for each day** from the assignment effective on that day (ARCHITECTURE: "the row effective on the date"). A new function in the employees module returns every assignment overlapping the period (HR for everyone, anyone else only for themself). A day with no assignment, which should not happen for someone who is employed, falls back to Saturday and Sunday off, no holidays and the default policy.
+- **Also changed:** the regularization deadline uses the policy of the person's location on the day being fixed, and the "late marks this month" limit shown on My attendance uses the policy effective today (or on the last day of a past month).
+- **Added to RESEARCH.md as R63.**
+- **Tests:** a pure lookup for "which assignment applies on this day", and database tests with a mid-month joiner (a holiday after joining must be a holiday, days before joining must not exist) and a mid-month transfer between locations with different weekly offs and holidays, checked both on screen and in the frozen month.
+- **Not changed:** the other review findings (race with the lock, unpaid leave in the frozen copy, half-day leave, comp-off concurrency, repeated maternity requests, future-dated managers, privileges, date validation, test database guard) are still open.
+
 ## 2026-10-31 - Attendance: month lock
 - **Status:** Accepted (2026-10-31, owner: "next: month lock"). Completes the attendance design in "Attendance module" and "regularization" (R28, P9).
 - **What it does (HR admin, Attendance > Month lock):** closes a finished month. It stores a **frozen copy** of every day for everyone who worked at Konkan Coastal Foods during that month (`attendance_day`, `locked = true`) and records the lock (`attendance_period`: who, when, how many people). Payroll reads the frozen copy.

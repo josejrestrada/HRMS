@@ -6,7 +6,7 @@ import { ForbiddenError, requireRole, type Actor } from "@/shared/roles";
 import { canDecide } from "@/shared/approvals";
 import { firstLockedMonth, lockedMonthKeys } from "@/shared/periods";
 import { addDays, formatDate, todayIST } from "@/shared/dates";
-import { getDirectReportIds, getWorkforce, isCurrentManagerOf, type WorkforceRow } from "@/modules/employees/data";
+import { getAssignmentSpans, getDirectReportIds, getWorkforce, isCurrentManagerOf, type AssignmentSpan, type WorkforceRow } from "@/modules/employees/data";
 import { getCalendarFacts } from "@/modules/leave/data";
 import {
   MONTH_NAMES,
@@ -19,6 +19,7 @@ import {
   isFixable,
   isUnpaidFrozen,
   nextPunchDirection,
+  spanAt,
   summarizeMonth,
   type DayResult,
   type MonthSummary,
@@ -145,11 +146,25 @@ async function deriveRange(
   to: string,
   q: Queryable,
   opts: { period?: boolean; ignoreFrozen?: boolean } = {},
-): Promise<{ workforce: WorkforceRow[]; days: Map<string, DayResult[]>; policies: Map<string, Policy> }> {
+): Promise<{
+  workforce: WorkforceRow[];
+  days: Map<string, DayResult[]>;
+  policies: Map<string, Policy>;
+  /** The attendance policy that applies to a person on a day (R63). */
+  policyAt: (employeeId: string, date: string) => Policy;
+}> {
   const today = todayIST();
   const workforce = await getWorkforce(actor, employeeIds, from, q, opts.period ? { from, to } : undefined);
   const ids = workforce.map((w) => w.id);
-  const locationIds = [...new Set(workforce.map((w) => w.locationId).filter((l): l is string => !!l))];
+
+  // Location, weekly offs, holidays and policy are decided per day from the assignment effective that
+  // day, not once for the first day of the period (R63).
+  const spans = ids.length === 0 ? [] : await getAssignmentSpans(actor, ids, from, to, q);
+  const spansBy = new Map<string, AssignmentSpan[]>();
+  for (const sp of spans) spansBy.set(sp.employeeId, [...(spansBy.get(sp.employeeId) ?? []), sp]);
+  const locationIds = [
+    ...new Set([...spans.map((sp) => sp.locationId), ...workforce.map((w) => w.locationId).filter((l): l is string => !!l)]),
+  ];
 
   const [policyRows, punchRows, facts, fixRows, frozenRows] = await Promise.all([
     q.query<{
@@ -224,10 +239,18 @@ async function deriveRange(
   const leaveBy = new Map<string, typeof facts.leave>();
   for (const l of facts.leave) leaveBy.set(l.employeeId, [...(leaveBy.get(l.employeeId) ?? []), l]);
 
+  const policyAt = (employeeId: string, date: string): Policy => {
+    const span = spanAt(
+      (spansBy.get(employeeId) ?? []).map((sp) => ({ ...sp, from: sp.from, to: sp.to })),
+      date,
+    );
+    return (span && policies.get(span.locationId)) || DEFAULT_POLICY;
+  };
+
   const dates = datesBetween(from, to);
   const days = new Map<string, DayResult[]>();
   for (const w of workforce) {
-    const policy = (w.locationId && policies.get(w.locationId)) || DEFAULT_POLICY;
+    const empSpans = spansBy.get(w.id) ?? [];
     days.set(
       w.id,
       dates.map((date) => {
@@ -250,22 +273,24 @@ async function deriveRange(
           } satisfies DayResult;
         }
         const leave = (leaveBy.get(w.id) ?? []).find((l) => l.start <= date && l.end >= date);
+        const span = spanAt(empSpans, date);
+        const weeklyOffDays = span?.weeklyOffDays ?? [0, 6]; // no assignment that day: Saturday and Sunday off
         return deriveDay({
           employed: date >= w.joiningDate && (!w.exitDate || date <= w.exitDate),
           date,
           today,
-          weeklyOff: w.weeklyOffDays.includes(new Date(`${date}T00:00:00Z`).getUTCDay()),
-          holiday: w.locationId ? (holidayBy.get(`${w.locationId}|${date}`) ?? null) : null,
+          weeklyOff: weeklyOffDays.includes(new Date(`${date}T00:00:00Z`).getUTCDay()),
+          holiday: span ? (holidayBy.get(`${span.locationId}|${date}`) ?? null) : null,
           leave: leave ? leave.part : null,
           wfh: false, // work from home requests arrive in the next slice
           punches: punchesBy.get(`${w.id}|${date}`) ?? [],
-          policy,
+          policy: (span && policies.get(span.locationId)) || DEFAULT_POLICY,
           regularization: fixBy.get(`${w.id}|${date}`) ?? null,
         });
       }),
     );
   }
-  return { workforce, days, policies };
+  return { workforce, days, policies, policyAt };
 }
 
 export async function getMyAttendance(actor: Actor | null, year: number, month: number, q: Queryable = { query }): Promise<MyAttendance> {
@@ -276,9 +301,10 @@ export async function getMyAttendance(actor: Actor | null, year: number, month: 
   const today = todayIST();
   const from = monthStart(year, month);
   const to = monthEnd(year, month);
-  const { workforce, days, policies } = await deriveRange(actor, [actor.employeeId], from, to, q);
+  const { workforce, days, policyAt } = await deriveRange(actor, [actor.employeeId], from, to, q);
   const me = workforce[0];
-  const policy = (me?.locationId && policies.get(me.locationId)) || DEFAULT_POLICY;
+  // The policy shown for the month is the one in force today (or on the last day of a past month).
+  const policy = policyAt(actor.employeeId, today < from ? from : today > to ? to : today);
   const list = days.get(actor.employeeId) ?? [];
 
   const todayPunches = await q.query<{ hm: string; direction: "in" | "out" }>(
@@ -296,7 +322,7 @@ export async function getMyAttendance(actor: Actor | null, year: number, month: 
   const pastDeadline: MyAttendance["pastDeadline"] = [];
   for (const d of locked ? [] : list) {
     if (!isFixable(d)) continue;
-    const ok = canRegularize({ date: d.date, today, regularizeUntilDay: policy.regularizeUntilDay });
+    const ok = canRegularize({ date: d.date, today, regularizeUntilDay: policyAt(actor.employeeId, d.date).regularizeUntilDay });
     if (ok.ok) fixable.push({ date: d.date, status: d.status, note: d.note });
     else if (d.date < today) pastDeadline.push({ date: d.date, note: d.note });
   }
@@ -449,13 +475,12 @@ export async function requestRegularizationsTx(tx: Queryable, actor: Actor | nul
 
   const from = [...dates].sort()[0];
   const to = [...dates].sort()[dates.length - 1];
-  const { days, policies, workforce } = await deriveRange(actor, [actor.employeeId], from, to, tx);
-  const policy = (workforce[0]?.locationId && policies.get(workforce[0].locationId)) || DEFAULT_POLICY;
+  const { days, policyAt } = await deriveRange(actor, [actor.employeeId], from, to, tx);
   const mine = new Map((days.get(actor.employeeId) ?? []).map((d) => [d.date, d]));
 
   for (const item of input.items) {
     const label = formatDate(item.date);
-    const when = canRegularize({ date: item.date, today, regularizeUntilDay: policy.regularizeUntilDay });
+    const when = canRegularize({ date: item.date, today, regularizeUntilDay: policyAt(actor.employeeId, item.date).regularizeUntilDay });
     if (!when.ok) throw new DomainError(`${label}: ${when.error}`);
     const times = checkFixTimes(item.in, item.out);
     if (!times.ok) throw new DomainError(`${label}: ${times.error}`);

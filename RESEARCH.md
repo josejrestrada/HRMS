@@ -169,6 +169,9 @@ These are my own design choices, informed by the research above. The statutory n
 - **R61.** Days before an employee joined, or after they left, are outside their employment and are never counted as absent.
 - **R62.** Leave cannot be applied for or approved for a locked month, and approved leave overlapping a locked month can only be cancelled by an HR admin.
 
+### Correction found in review (see docs/decisions.md)
+- **R63.** Weekly offs, holidays and the attendance policy are decided for each day by the location on the person's assignment effective that day, not once for the whole month. A person who joined or transferred mid-month therefore gets the right calendar on every day.
+
 ### Still to resolve
 - Which Goa Act applies now (1973 or 2025) and its commencement date, and whether the plant in Verna is also covered by the Factories Act.
 - The official Goa 2026 holiday notification, to replace the tentative list in section 6.
