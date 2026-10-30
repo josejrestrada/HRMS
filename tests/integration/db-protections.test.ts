@@ -4,8 +4,9 @@
 import { Pool } from "@neondatabase/serverless";
 import type { PoolClient } from "@neondatabase/serverless";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { databaseTestsEnabled } from "./enabled";
 
-const enabled = process.env.RUN_DB_TESTS === "yes" && !!process.env.DATABASE_URL;
+const enabled = databaseTestsEnabled();
 
 describe.skipIf(!enabled)("database protections (rolled back)", () => {
   let pool: Pool;

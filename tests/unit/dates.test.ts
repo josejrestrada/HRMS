@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, addMonths, daysBetween, formatDate, tenureText, todayIST, weekdayName } from "../../src/shared/dates";
+import { addDays, addMonths, daysBetween, isRealDate, formatDate, tenureText, todayIST, weekdayName } from "../../src/shared/dates";
 
 describe("IST dates", () => {
   it("rolls over to the next day at 18:30 UTC (midnight IST)", () => {
@@ -56,5 +56,24 @@ describe("addMonths", () => {
 
   it("can go backwards", () => {
     expect(addMonths("2026-01-31", -2)).toBe("2025-11-30");
+  });
+});
+
+describe("isRealDate (review finding 10)", () => {
+  it("accepts real dates, including 29 February in a leap year", () => {
+    expect(isRealDate("2026-10-31")).toBe(true);
+    expect(isRealDate("2024-02-29")).toBe(true);
+  });
+
+  it("rejects dates that look right but do not exist", () => {
+    expect(isRealDate("2026-02-31")).toBe(false);
+    expect(isRealDate("2025-02-29")).toBe(false);
+    expect(isRealDate("2026-13-01")).toBe(false);
+    expect(isRealDate("2026-00-10")).toBe(false);
+    expect(isRealDate("2026-04-31")).toBe(false);
+  });
+
+  it("rejects text that is not in the YYYY-MM-DD shape", () => {
+    for (const bad of ["", "2026-1-5", "26-10-31", "2026/10/31", "yesterday", "2026-10-31T00:00", " 2026-10-31"]) expect(isRealDate(bad)).toBe(false);
   });
 });

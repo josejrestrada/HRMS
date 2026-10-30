@@ -78,6 +78,18 @@ describe("cross-module helpers only show an employee their own data", () => {
   });
 });
 
+describe("getDaySheet validates the date (review finding 10)", () => {
+  it("answers an impossible date with a plain message and never reaches the database", async () => {
+    await expect(attendance.getDaySheet(hr, "2026-02-31")).rejects.toThrow(/valid date/);
+    await expect(attendance.getDaySheet(hr, "not-a-date")).rejects.toThrow(/valid date/);
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it("still lets an HR admin ask for a real date", async () => {
+    await expect(attendance.getDaySheet(hr, "2026-02-28")).resolves.toMatchObject({ date: "2026-02-28" });
+  });
+});
+
 describe("getMyAttendance validates the month", () => {
   it("refuses an impossible month without querying", async () => {
     await expect(attendance.getMyAttendance(employee, 2026, 13)).rejects.toThrow(/valid month/);

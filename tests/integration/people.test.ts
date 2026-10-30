@@ -4,10 +4,11 @@
 import { Pool } from "@neondatabase/serverless";
 import type { PoolClient } from "@neondatabase/serverless";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { databaseTestsEnabled } from "./enabled";
 
 vi.mock("server-only", () => ({}));
 
-const enabled = process.env.RUN_DB_TESTS === "yes" && !!process.env.DATABASE_URL;
+const enabled = databaseTestsEnabled();
 
 describe.skipIf(!enabled)("People rules against the database", () => {
   let pool: Pool;

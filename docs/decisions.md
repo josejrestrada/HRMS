@@ -31,6 +31,16 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## Accepted
 
+## 2026-10-31 - Review fixes: app-role privileges, impossible dates, and a guard for database tests
+- **Status:** Accepted (2026-10-31, owner: "fix 9, 10, 11" of the review).
+- **Finding 9, privileges (migration 011):**
+  - **`attendance_policy`:** the app role loses UPDATE. Nothing in the app changes the policy, and its values (grace, full-day minutes, deadline) feed payroll-relevant statuses, so a compromised app could otherwise change them without a trace. When an admin screen is built it will update the policy through an audited function and the grant comes back then, with the audit.
+  - **Defence in depth:** `regularization`, `compoff_request` and `attendance_day` get the same TRUNCATE guard as the other protected tables. The app role already has no TRUNCATE privilege; this protects against someone using another role.
+  - **A test that cannot be forgotten:** one privilege test now checks **every table in the database** for the app role: nothing is deleted or truncated except role assignments, the append-only tables (audit log, leave ledger, punches, attendance periods) have no UPDATE, no table has been left without access, and `schema_migration` is not reachable at all. A table added later without a grant fails this test.
+- **Finding 10, impossible dates:** a date that looks right but does not exist (such as 31 February) used to reach the database and cause a server error on the Team page. A real-date check (`isRealDate`) now runs first; the data function answers with a plain message and the page falls back to today.
+- **Finding 11, database tests and the wrong database:** database tests now run **only if the database host is named on purpose**: `TEST_DATABASE_HOST` must equal the host in `DATABASE_URL`, exactly like the seed guard. If tests are switched on without it (or with a different host), the run fails loudly at the start instead of touching the database. This project's Neon database is the **development** database (decision of 2026-10-30), so that is the one named in `.env.local`; production will be a different project and its host must never be named there.
+- **Not changed:** finding 4 (half-day leave) and finding 8 (two helper functions without an acting user, recorded here as a known exception: `isCurrentManagerOf` and the month-lock checks in `src/shared/periods.ts` are internal helpers called only from functions that already know the acting user and have checked their role).
+
 ## 2026-10-31 - Review fixes: comp-off concurrency, one maternity per delivery, manager effective today
 - **Status:** Accepted (2026-10-31, owner: "fix 5, 6, 7" of the review).
 - **Finding 5, two approvals could use the same comp-off credit.** Two comp-off leave approvals for the same employee running at the same time both read the same remaining days and both used the same credit. **Fix, in two layers:** (1) deciding or cancelling comp-off leave now locks the employee's row first, as applying already does, so the second approval waits and then sees the first one's debit; (2) a database check on the ledger, so a mistake in the app cannot overspend: any ledger row that uses a comp-off credit takes a per-credit lock and must leave that credit with between 0 and its original number of days.

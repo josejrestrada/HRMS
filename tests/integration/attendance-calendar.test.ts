@@ -4,10 +4,11 @@
 import { Pool } from "@neondatabase/serverless";
 import type { PoolClient } from "@neondatabase/serverless";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { databaseTestsEnabled } from "./enabled";
 
 vi.mock("server-only", () => ({}));
 
-const enabled = process.env.RUN_DB_TESTS === "yes" && !!process.env.DATABASE_URL;
+const enabled = databaseTestsEnabled();
 
 type TestActor = { employeeId: string; employeeCode: string; fullName: string; roles: ("employee" | "hr_admin")[] };
 const D = (day: number) => `2025-03-${String(day).padStart(2, "0")}`;

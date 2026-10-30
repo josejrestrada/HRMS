@@ -1,10 +1,11 @@
 // Read-only. Runs only with RUN_DB_TESTS=yes (npm run test:db). Checks that the dashboard SQL runs
 // against the real schema and that the numbers are internally consistent.
 import { describe, expect, it, vi } from "vitest";
+import { databaseTestsEnabled } from "./enabled";
 
 vi.mock("server-only", () => ({}));
 
-const enabled = process.env.RUN_DB_TESTS === "yes" && !!process.env.DATABASE_URL;
+const enabled = databaseTestsEnabled();
 
 describe.skipIf(!enabled)("HR dashboard against the database (read-only)", () => {
   it("returns consistent numbers", async () => {

@@ -5,7 +5,7 @@ import { recordAudit } from "@/shared/audit";
 import { ForbiddenError, requireRole, type Actor } from "@/shared/roles";
 import { canDecide } from "@/shared/approvals";
 import { firstLockedMonth, lockMonthExclusive, lockMonthsShared, lockedMonthKeys } from "@/shared/periods";
-import { addDays, formatDate, todayIST } from "@/shared/dates";
+import { addDays, formatDate, isRealDate, todayIST } from "@/shared/dates";
 import { getAssignmentSpans, getDirectReportIds, getWorkforce, isCurrentManagerOf, type AssignmentSpan, type WorkforceRow } from "@/modules/employees/data";
 import { getCalendarFacts } from "@/modules/leave/data";
 import {
@@ -404,7 +404,7 @@ export async function punch(actor: Actor | null) {
 /** HR: every active employee's status for one date. */
 export async function getDaySheet(actor: Actor | null, date: string, q: Queryable = { query }): Promise<DaySheet> {
   requireRole(actor, "hr_admin");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new DomainError("Choose a valid date.");
+  if (!isRealDate(date)) throw new DomainError("Choose a valid date.");
   const { workforce, days } = await deriveRange(actor, null, date, date, q);
   const rows: DayRow[] = workforce.map((w) => ({
     id: w.id,
