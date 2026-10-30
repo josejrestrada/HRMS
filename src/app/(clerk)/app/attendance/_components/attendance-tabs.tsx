@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 export function AttendanceTabs(props: {
-  current: "my" | "approvals" | "team";
+  current: "my" | "approvals" | "team" | "lock";
   isHr: boolean;
   canApprove?: boolean;
   pending?: number;
@@ -19,6 +19,7 @@ export function AttendanceTabs(props: {
         ? tab("approvals", "/app/attendance/approvals", <>Approvals {props.pending ? <span className="chip chip-warn">{props.pending}</span> : null}</>)
         : null}
       {props.isHr ? tab("team", "/app/attendance/team", "Team today") : null}
+      {props.isHr ? tab("lock", "/app/attendance/lock", "Month lock") : null}
     </nav>
   );
 }

@@ -33,6 +33,9 @@ describe("attendance functions refuse a missing actor without touching the datab
     ["decideRegularizations", () => attendance.decideRegularizations(null, { requestIds: ["7b0c8c52-3a52-4d7c-9d2e-0f6f3f3f3f3f"], decision: "approve" })],
     ["listRegularizationApprovals", () => attendance.listRegularizationApprovals(null)],
     ["getAttendanceApprovalScope", () => attendance.getAttendanceApprovalScope(null)],
+    ["getLockOverview", () => attendance.getLockOverview(null, 2026)],
+    ["previewMonthLock", () => attendance.previewMonthLock(null, 2026, 9)],
+    ["lockMonth", () => attendance.lockMonth(null, { year: 2026, month: 9 })],
   ])("%s", async (_n, run) => {
     await expect(run()).rejects.toBeInstanceOf(ForbiddenError);
     expect(queryMock).not.toHaveBeenCalled();
@@ -101,5 +104,32 @@ describe("an ordinary employee with no reports sees no approvals", () => {
     expect(await attendance.listRegularizationApprovals(employee)).toEqual([]);
     queryMock.mockResolvedValueOnce([]);
     expect(await attendance.getAttendanceApprovalScope(employee)).toEqual({ canApprove: false, pending: 0 });
+  });
+});
+
+describe("the month lock is for HR admins only", () => {
+  it("refuses an ordinary employee before any query", async () => {
+    await expect(attendance.getLockOverview(employee, 2026)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(attendance.previewMonthLock(employee, 2026, 9)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(attendance.lockMonth(employee, { year: 2026, month: 9 })).rejects.toBeInstanceOf(ForbiddenError);
+    const tx = { query: vi.fn() };
+    await expect(attendance.lockMonthTx(tx, employee, { year: 2026, month: 9 })).rejects.toBeInstanceOf(ForbiddenError);
+    expect(tx.query).not.toHaveBeenCalled();
+    expect(queryMock).not.toHaveBeenCalled();
+    expect(transactionMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses an impossible month and a month that has not ended, before locking anything", async () => {
+    const tx = { query: vi.fn() };
+    await expect(attendance.lockMonthTx(tx, hr, { year: 2026, month: 13 })).rejects.toThrow(/valid month/);
+    await expect(attendance.lockMonthTx(tx, hr, { year: 2999, month: 1 })).rejects.toThrow(/valid month/);
+    const now = new Date();
+    await expect(attendance.lockMonthTx(tx, hr, { year: now.getUTCFullYear() + 1, month: 1 })).rejects.toThrow(/valid month|after it has ended/);
+    expect(tx.query).not.toHaveBeenCalled();
+  });
+
+  it("only HR can read people for a whole period", async () => {
+    await expect(getWorkforce(employee, ["e1"], "2026-09-01", undefined, { from: "2026-09-01", to: "2026-09-30" })).rejects.toBeInstanceOf(ForbiddenError);
+    expect(queryMock).not.toHaveBeenCalled();
   });
 });

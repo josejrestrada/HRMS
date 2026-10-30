@@ -42,6 +42,11 @@ export function TeamView({ sheet, today, pending }: { sheet: DaySheet; today: st
             <span className="chip">Not in yet {sheet.notCheckedIn}</span>
           </li>
         ) : null}
+        {sheet.notEmployed > 0 ? (
+          <li>
+            <span className="chip">Not employed {sheet.notEmployed}</span>
+          </li>
+        ) : null}
         {sheet.late > 0 ? (
           <li>
             <span className="chip chip-warn">Late {sheet.late}</span>
@@ -79,7 +84,7 @@ export function TeamView({ sheet, today, pending }: { sheet: DaySheet; today: st
                     </td>
                     <td data-label="Location">{r.location ?? "–"}</td>
                     <td data-label="Status">
-                      <StatusChip status={r.day.status} provisional={r.day.provisional} />
+                      {r.day.employed ? <StatusChip status={r.day.status} provisional={r.day.provisional} /> : <span className="chip">Not employed</span>}
                       {r.day.late ? <span className="sub">Late</span> : null}
                     </td>
                     <td data-label="In">{r.day.firstIn ?? "–"}</td>

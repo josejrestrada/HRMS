@@ -57,6 +57,12 @@ export function MyAttendanceView(props: {
       {props.saved && FIX_SAVED[props.saved] ? <div className="alert alert-ok" role="status">{FIX_SAVED[props.saved]}</div> : null}
       {props.error ? <div className="alert alert-error" role="alert">{props.error}</div> : null}
 
+      {data.locked ? (
+        <div className="alert alert-ok" role="status">
+          This month is locked. It is final, so its days can no longer be changed. Talk to HR if something is wrong.
+        </div>
+      ) : null}
+
       <section className="panel punch-card" aria-labelledby="p-today">
         <div>
           <h2 id="p-today">Today, {weekdayName(data.today)} {formatDate(data.today)}</h2>
@@ -138,6 +144,7 @@ export function MyAttendanceView(props: {
                 ) : null}
                 {d.late ? <span className="cal-late">Late</span> : null}
                 {d.fixPending ? <span className="cal-late">Fix sent</span> : null}
+                {d.locked && d.note?.includes("not fixed in time") ? <span className="cal-late">Unpaid</span> : null}
                 {d.regularized ? <span className="cal-times">Fixed</span> : null}
               </div>
             );

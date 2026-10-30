@@ -13,21 +13,23 @@ const punchMock = vi.fn();
 const requestMock = vi.fn();
 const cancelMock = vi.fn();
 const decideMock = vi.fn();
+const lockMock = vi.fn();
 vi.mock("@/modules/attendance/data", () => ({
   punch: (...a: unknown[]) => punchMock(...a),
   requestRegularizations: (...a: unknown[]) => requestMock(...a),
   cancelRegularization: (...a: unknown[]) => cancelMock(...a),
   decideRegularizations: (...a: unknown[]) => decideMock(...a),
+  lockMonth: (...a: unknown[]) => lockMock(...a),
 }));
 
-import { cancelRegularizationAction, decideRegularizationAction, punchAction, requestRegularizationAction } from "@/app/(clerk)/app/attendance/actions";
+import { cancelRegularizationAction, decideRegularizationAction, lockMonthAction, punchAction, requestRegularizationAction } from "@/app/(clerk)/app/attendance/actions";
 import { DomainError } from "@/shared/errors";
 import { ForbiddenError, type Actor } from "@/shared/roles";
 
 const employee: Actor = { employeeId: "e", employeeCode: "KCF0002", fullName: "E", roles: ["employee"] };
 
 beforeEach(() => {
-  [actorMock, punchMock, requestMock, cancelMock, decideMock].forEach((m) => m.mockReset());
+  [actorMock, punchMock, requestMock, cancelMock, decideMock, lockMock].forEach((m) => m.mockReset());
 });
 
 describe("punchAction", () => {
@@ -156,5 +158,36 @@ describe("decide and cancel actions", () => {
     const f = new FormData();
     f.set("requestId", id1);
     await expect(cancelRegularizationAction(f)).rejects.toThrow("REDIRECT:/app/attendance?saved=fixcancelled");
+  });
+});
+
+describe("lockMonthAction", () => {
+  const lockForm = (year: string, month: string) => {
+    const f = new FormData();
+    f.set("year", year);
+    f.set("month", month);
+    return f;
+  };
+
+  it("is refused for anyone who is not an HR admin, without locking", async () => {
+    for (const actor of [null, employee]) {
+      actorMock.mockResolvedValue(actor);
+      await expect(lockMonthAction(lockForm("2026", "9"))).rejects.toBeInstanceOf(ForbiddenError);
+    }
+    expect(lockMock).not.toHaveBeenCalled();
+  });
+
+  it("needs a real month", async () => {
+    actorMock.mockResolvedValue(hr);
+    await expect(lockMonthAction(lockForm("2026", "x"))).rejects.toThrow(/error=Choose\+a\+month/);
+    expect(lockMock).not.toHaveBeenCalled();
+  });
+
+  it("shows a domain error on the lock page, and redirects with the totals on success", async () => {
+    actorMock.mockResolvedValue(hr);
+    lockMock.mockRejectedValueOnce(new DomainError("2 fixes are still waiting for approval."));
+    await expect(lockMonthAction(lockForm("2026", "9"))).rejects.toThrow(/REDIRECT:\/app\/attendance\/lock\?year=2026&month=9&error=2\+fixes/);
+    lockMock.mockResolvedValueOnce({ year: 2026, month: 9, employees: 23, days: 690, unpaidDays: 4 });
+    await expect(lockMonthAction(lockForm("2026", "9"))).rejects.toThrow(/saved=locked&month=9&people=23&unpaid=4/);
   });
 });

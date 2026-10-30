@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  canLockMonth,
   canRegularize,
   checkFixTimes,
   defaultFixTimes,
   deriveDay,
+  freezeDay,
+  isUnpaidFrozen,
   formatMinutes,
   isFixable,
   isLate,
@@ -244,5 +247,59 @@ describe("checkFixTimes and defaultFixTimes", () => {
 
   it("prefills the normal working hours", () => {
     expect(defaultFixTimes(policy)).toEqual({ in: "09:30", out: "17:30" });
+  });
+});
+
+describe("days outside employment (R61)", () => {
+  it("are not absent, and are never stored", () => {
+    const r = deriveDay(day({ employed: false }));
+    expect(r).toMatchObject({ status: "upcoming", employed: false, needsAction: false });
+    expect(freezeDay(r)).toBeNull();
+  });
+});
+
+describe("freezeDay (R59)", () => {
+  it("keeps a good day as it is", () => {
+    expect(freezeDay(deriveDay(day({ punches: inOut("09:20", "17:45") })))).toMatchObject({ status: "present", firstIn: "09:20", lastOut: "17:45", late: false });
+    expect(freezeDay(deriveDay(day({ weeklyOff: true })))).toMatchObject({ status: "weekly_off" });
+    expect(freezeDay(deriveDay(day({ leave: "full" })))).toMatchObject({ status: "leave" });
+  });
+
+  it("turns a missed check-out into an unpaid absent day", () => {
+    const f = freezeDay(deriveDay(day({ punches: [{ time: "09:30", direction: "in" }] })))!;
+    expect(f.status).toBe("absent");
+    expect(f.note).toContain("not fixed in time");
+    expect(isUnpaidFrozen(f)).toBe(true);
+    expect(f.firstIn).toBe("09:30");
+  });
+
+  it("turns a day with no punches, and a very short day, into unpaid absent days", () => {
+    expect(isUnpaidFrozen(freezeDay(deriveDay(day()))!)).toBe(true);
+    expect(isUnpaidFrozen(freezeDay(deriveDay(day({ punches: inOut("09:30", "12:00") })))!)).toBe(true);
+  });
+
+  it("does not mark a fixed day as unpaid, even if the approved hours are short", () => {
+    const fixed = freezeDay(deriveDay(day({ regularization: { in: "09:30", out: "12:00", status: "approved" } })))!;
+    expect(fixed.status).toBe("absent");
+    expect(isUnpaidFrozen(fixed)).toBe(false);
+  });
+
+  it("keeps half days and late marks", () => {
+    const f = freezeDay(deriveDay(day({ punches: inOut("10:10", "15:00") })))!;
+    expect(f).toMatchObject({ status: "half_day", late: true });
+  });
+});
+
+describe("canLockMonth (R58)", () => {
+  it("only allows a month that has ended", () => {
+    expect(canLockMonth({ today: "2026-10-30", year: 2026, month: 10 })).toMatchObject({ ok: false });
+    expect(canLockMonth({ today: "2026-10-31", year: 2026, month: 10 })).toMatchObject({ ok: false });
+    expect(canLockMonth({ today: "2026-11-01", year: 2026, month: 10 })).toEqual({ ok: true });
+    expect(canLockMonth({ today: "2026-10-30", year: 2026, month: 9 })).toEqual({ ok: true });
+    expect(canLockMonth({ today: "2027-01-01", year: 2026, month: 12 })).toEqual({ ok: true });
+  });
+
+  it("explains itself", () => {
+    expect((canLockMonth({ today: "2026-10-30", year: 2026, month: 10 }) as { error: string }).error).toContain("October 2026");
   });
 });

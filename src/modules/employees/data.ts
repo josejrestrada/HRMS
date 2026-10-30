@@ -525,6 +525,8 @@ export type WorkforceRow = {
   locationId: string | null;
   locationName: string | null;
   weeklyOffDays: number[];
+  joiningDate: string;
+  exitDate: string | null;
 };
 
 /** Active employees with the location and department effective on `date`. `null` ids means everyone (HR only). */
@@ -533,8 +535,11 @@ export async function getWorkforce(
   employeeIds: string[] | null,
   date: string,
   q: Queryable = { query },
+  /** HR only: everyone employed at any time in the period, including people who have since left. */
+  period?: { from: string; to: string },
 ): Promise<WorkforceRow[]> {
   requireRole(actor, "employee");
+  if (period) requireRole(actor, "hr_admin");
   if (employeeIds === null) requireRole(actor, "hr_admin");
   else if (!actor.roles.includes("hr_admin") && employeeIds.some((id) => id !== actor.employeeId)) {
     throw new ForbiddenError();
@@ -547,15 +552,21 @@ export async function getWorkforce(
     location_id: string | null;
     location_name: string | null;
     weekly_off_days: number[] | null;
+    joining_date: string;
+    exit_date: string | null;
   }>(
-    `select e.id, e.employee_code, e.full_name, a.department, l.id as location_id, l.name as location_name, l.weekly_off_days
+    `select e.id, e.employee_code, e.full_name, a.department, l.id as location_id, l.name as location_name, l.weekly_off_days,
+            e.joining_date::text, e.exit_date::text
        from employee e
        left join employment_assignment a on a.employee_id = e.id
         and a.effective_from <= $2::date and (a.effective_to is null or a.effective_to >= $2::date)
        left join location l on l.id = a.location_id
-      where e.status = 'active' and ($1::uuid[] is null or e.id = any($1::uuid[]))
+      where ($1::uuid[] is null or e.id = any($1::uuid[]))
+        and (case when $3::boolean
+                  then e.joining_date <= $5::date and (e.exit_date is null or e.exit_date >= $4::date)
+                  else e.status = 'active' end)
       order by e.full_name, e.employee_code`,
-    [employeeIds, date],
+    [employeeIds, date, !!period, period?.from ?? date, period?.to ?? date],
   );
   return rows.map((r) => ({
     id: r.id,
@@ -565,6 +576,8 @@ export async function getWorkforce(
     locationId: r.location_id,
     locationName: r.location_name,
     weeklyOffDays: r.weekly_off_days ?? [0, 6],
+    joiningDate: r.joining_date,
+    exitDate: r.exit_date,
   }));
 }
 

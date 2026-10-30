@@ -162,6 +162,13 @@ These are my own design choices, informed by the research above. The statutory n
 - **R56.** Approved times replace that day's punches only for working out its status; the raw punches are never changed. The fixed day is then judged by R27, so late marks are recomputed from the approved check-in time.
 - **R57.** Regularization is approved under the same rules as leave (R20, R31). A request still waiting does not fix the day.
 
+### Clarifications from building the month lock (see docs/decisions.md)
+- **R58.** An HR admin locks a month only after it has ended. Locking stores a frozen copy of every day for everyone employed during the month, and payroll reads that copy.
+- **R59.** At lock, a day that still needs action is stored as absent (unpaid). Fixes still waiting for approval block the lock.
+- **R60.** A locked month cannot be changed: no punches, no fixes, no edits to the frozen days. Corrections need a later adjustment.
+- **R61.** Days before an employee joined, or after they left, are outside their employment and are never counted as absent.
+- **R62.** Leave cannot be applied for or approved for a locked month, and approved leave overlapping a locked month can only be cancelled by an HR admin.
+
 ### Still to resolve
 - Which Goa Act applies now (1973 or 2025) and its commencement date, and whether the plant in Verna is also covered by the Factories Act.
 - The official Goa 2026 holiday notification, to replace the tentative list in section 6.

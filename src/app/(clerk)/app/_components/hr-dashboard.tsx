@@ -122,7 +122,7 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
   const { headcount, onLeave, onLeaveTotal, pending, attendance, holidays, recentJoiners, attention, byDepartment } = data;
   const total = headcount.total;
   const working = (attendance.counts.present ?? 0) + (attendance.counts.wfh ?? 0) + (attendance.counts.half_day ?? 0);
-  const expected = Math.max(total - attendance.offToday, 0);
+  const expected = Math.max(total - attendance.offToday - attendance.notEmployed, 0);
   const allOff = total > 0 && expected === 0;
   const presentPct = attendance.recorded > 0 && expected > 0 ? Math.round((working / expected) * 100) : null;
   const flagged =

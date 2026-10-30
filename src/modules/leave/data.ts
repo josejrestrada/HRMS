@@ -4,6 +4,7 @@ import { recordAudit } from "@/shared/audit";
 import { DomainError } from "@/shared/errors";
 import { ForbiddenError, requireRole, type Actor } from "@/shared/roles";
 import { canDecide } from "@/shared/approvals";
+import { firstLockedMonth } from "@/shared/periods";
 import { addDays, addMonths, formatDate, todayIST } from "@/shared/dates";
 import { getSelfFacts } from "@/modules/employees/data";
 import type { ApplyLeaveInput, CompoffInput, DecisionInput, MaternityInput, PaternityInput } from "./schemas";
@@ -32,6 +33,17 @@ import {
 // functions come in two forms: `xxx` opens a transaction, `xxxTx` runs inside one (for tests).
 
 const HOLDS = `'pending_hold', 'hold_release'`;
+
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/** R62: leave cannot be applied for, or approved, for a month HR has locked. */
+async function assertNotInLockedMonth(tx: Queryable, start: string, end: string, field?: string) {
+  const locked = await firstLockedMonth(tx, [start, end]);
+  if (locked) {
+    const [y, m] = locked.split("-").map(Number);
+    throw new DomainError(`${MONTH_NAMES[m - 1]} ${y} is closed, so leave for those dates cannot be changed. Please talk to HR.`, field);
+  }
+}
 const BALANCE_TYPES = ["CL", "SL", "EL"];
 const STATEMENT_TYPES = ["CL", "SL", "EL", "COMPOFF"];
 
@@ -310,6 +322,7 @@ export async function applyLeaveTx(tx: Queryable, actor: Actor | null, input: Ap
 
   const emp = (await tx.query<{ status: string }>("select status from employee where id = $1 for update", [actor.employeeId]))[0];
   if (!emp || emp.status !== "active") throw new DomainError("Only active employees can apply for leave."); // R5
+  await assertNotInLockedMonth(tx, input.startDate, input.endDate, "startDate");
 
   const type = (
     await tx.query<{ id: string; code: string; name: string; accrual_mode: string; max: number | null }>(
@@ -463,6 +476,7 @@ export async function decideLeaveTx(tx: Queryable, actor: Actor | null, input: D
     requesterEmployeeId: req.employee_id,
   });
   if (!allowed) throw new ForbiddenError("You cannot decide this request.");
+  if (input.decision === "approve") await assertNotInLockedMonth(tx, req.start_date, req.end_date);
 
   const held = req.held;
   const year = Number(req.start_date.slice(0, 4));
@@ -524,6 +538,9 @@ export async function cancelLeaveTx(tx: Queryable, actor: Actor | null, requestI
 
   const mine = req.employee_id === actor.employeeId;
   if (!mine && !isHr(actor)) throw new ForbiddenError("You cannot cancel this request.");
+  if (req.status === "approved" && !isHr(actor) && (await firstLockedMonth(tx, [req.start_date, req.end_date]))) {
+    throw new DomainError("This leave overlaps a closed month, so only HR can cancel it.");
+  }
   if (!canCancel({ actorEmployeeId: actor.employeeId, actorIsHrAdmin: isHr(actor), requesterEmployeeId: req.employee_id, status: req.status, startDate: req.start_date, today })) {
     throw new DomainError("Leave that has already started can only be cancelled by HR.");
   }
@@ -1032,6 +1049,7 @@ export async function applyMaternityTx(tx: Queryable, actor: Actor | null, input
     gender: emp.gender,
   });
   if (!check.ok) throw new DomainError(check.error, check.field || undefined);
+  await assertNotInLockedMonth(tx, input.startDate, check.endDate, "startDate");
   await assertNoOverlap(tx, actor.employeeId, input.startDate, check.endDate);
 
   const created = await tx.query<{ id: string }>(
@@ -1084,6 +1102,7 @@ export async function applyPaternityTx(tx: Queryable, actor: Actor | null, input
     addMonthsFn: addMonths,
   });
   if (!check.ok) throw new DomainError(check.error, check.field || undefined);
+  await assertNotInLockedMonth(tx, input.startDate, input.endDate, "startDate");
   await assertNoOverlap(tx, actor.employeeId, input.startDate, input.endDate);
 
   const created = await tx.query<{ id: string }>(

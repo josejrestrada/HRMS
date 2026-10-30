@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/shared/auth";
 import { DomainError } from "@/shared/errors";
 import { requireRole } from "@/shared/roles";
-import { cancelRegularization, decideRegularizations, punch, requestRegularizations } from "@/modules/attendance/data";
+import { cancelRegularization, decideRegularizations, lockMonth, punch, requestRegularizations } from "@/modules/attendance/data";
 import { regularizationDecisionSchema, regularizeSchema } from "@/modules/attendance/schemas";
 import { ForbiddenError } from "@/shared/roles";
 import { blankToUndefined, formValues } from "@/shared/validation";
@@ -93,4 +93,27 @@ export async function decideRegularizationAction(formData: FormData) {
   }
   revalidatePath("/app/attendance", "layout");
   redirect(`/app/attendance/approvals?saved=${parsed.data.decision === "approve" ? "approved" : "rejected"}&count=${parsed.data.requestIds.length}`);
+}
+
+/** HR: lock a finished month. Final: there is no unlock in the app. */
+export async function lockMonthAction(formData: FormData) {
+  const actor = await getCurrentActor();
+  requireRole(actor, "hr_admin");
+  const values = formValues(formData);
+  const year = Number(values.year);
+  const month = Number(values.month);
+  if (!Number.isInteger(year) || !Number.isInteger(month)) backWithError("/app/attendance/lock", "Choose a month to lock.");
+  let result;
+  try {
+    result = await lockMonth(actor, { year, month });
+  } catch (err) {
+    if (err instanceof DomainError) {
+      redirect(`/app/attendance/lock?${new URLSearchParams({ year: String(year), month: String(month), error: err.message }).toString()}`);
+    }
+    throw err;
+  }
+  revalidatePath("/app/attendance", "layout");
+  redirect(
+    `/app/attendance/lock?${new URLSearchParams({ year: String(year), saved: "locked", month: String(month), people: String(result.employees), unpaid: String(result.unpaidDays) }).toString()}`,
+  );
 }

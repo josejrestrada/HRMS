@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation";
-import type { DaySheet, MyAttendance, RegularizationApproval } from "@/modules/attendance/data";
+import type { DaySheet, LockPreview, MonthLockRow, MyAttendance, RegularizationApproval } from "@/modules/attendance/data";
 import { defaultFixTimes, deriveDay, isFixable, summarizeMonth, type DayResult, type Policy, type PunchTime } from "@/modules/attendance/rules";
 import { MyAttendanceView } from "../../(clerk)/app/attendance/_components/my-attendance-view";
 import { AttendanceApprovalsView } from "../../(clerk)/app/attendance/_components/approvals-view";
+import { LockView } from "../../(clerk)/app/attendance/_components/lock-view";
 import { TeamView } from "../../(clerk)/app/attendance/_components/team-view";
 
 // Development-only design preview with made-up punches. It reads no database and no session, and it
@@ -55,6 +56,7 @@ const my: MyAttendance = {
   todayIn: "09:24",
   todayOut: null,
   canPunch: true,
+  locked: false,
   fixable: days.filter((d) => isFixable(d)).map((d) => ({ date: d.date, status: d.status, note: d.note })),
   pastDeadline: [],
   defaults: defaultFixTimes(policy),
@@ -93,6 +95,31 @@ const sheet: DaySheet = {
   counts: { present: 3, leave: 1 },
   notCheckedIn: 1,
   late: sheetRows.filter((r) => r.day.late).length,
+  notEmployed: 0,
+};
+
+const lockMonths: MonthLockRow[] = Array.from({ length: 12 }, (_, i) => {
+  const month = i + 1;
+  if (month <= 8) return { month, state: "locked" as const, lockedAt: `2026-${String(month + 1).padStart(2, "0")}-06 10:15`, lockedBy: "HR Administrator", employees: 22 };
+  if (month === 9) return { month, state: "open" as const, lockedAt: null, lockedBy: null, employees: null };
+  return { month, state: "future" as const, lockedAt: null, lockedBy: null, employees: null };
+});
+const lockPreview: LockPreview = {
+  year: 2026,
+  month: 9,
+  label: "September 2026",
+  employees: 23,
+  days: 690,
+  unpaidDays: 5,
+  unpaidPeople: [
+    { code: "KCF0016", name: "Nikhil Mhambre", days: 3 },
+    { code: "KCF0011", name: "Sneha Pednekar", days: 2 },
+  ],
+  pendingFixes: 0,
+  beforeDeadline: false,
+  alreadyLocked: false,
+  blockers: [],
+  canLock: true,
 };
 
 export default async function AttendancePreview({ searchParams }: { searchParams: Promise<{ view?: string }> }) {
@@ -102,7 +129,17 @@ export default async function AttendancePreview({ searchParams }: { searchParams
     <div className="app-shell">
       <div className="app-body">
         <main id="main" className="app-main">
-          {view === "team" ? (
+          {view === "lock" ? (
+            <LockView year={2026} months={lockMonths} preview={lockPreview} canApprove pendingApprovals={3} />
+          ) : view === "lockblocked" ? (
+            <LockView
+              year={2026}
+              months={lockMonths}
+              preview={{ ...lockPreview, pendingFixes: 2, canLock: false, blockers: ["2 fixes are still waiting for approval. Decide them first."] }}
+              canApprove
+              pendingApprovals={3}
+            />
+          ) : view === "team" ? (
             <TeamView sheet={sheet} today={TODAY} pending={3} />
           ) : view === "approvals" ? (
             <AttendanceApprovalsView rows={approvals} isHr saved="approved" count="2" />

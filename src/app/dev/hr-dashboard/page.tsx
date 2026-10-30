@@ -43,7 +43,7 @@ const data: HrDashboard = {
       { employeeCode: "KCF0013", fullName: "Divya Rane", leaveCode: "SL", startDate: "2026-10-30", endDate: "2026-10-30", days: 1, waitingDays: 0 },
     ],
   },
-  attendance: { counts: { present: 12, wfh: 2, half_day: 1, leave: 3, absent: 1 }, recorded: 19, notRecorded: 4, offToday: 0 },
+  attendance: { counts: { present: 12, wfh: 2, half_day: 1, leave: 3, absent: 1 }, recorded: 19, notRecorded: 4, offToday: 0, notEmployed: 0 },
   holidays: [
     { date: "2026-12-03", name: "Feast of St Francis Xavier", type: "state", verified: false, locations: ["Panaji", "Verna"] },
     { date: "2026-12-19", name: "Goa Liberation Day", type: "state", verified: false, locations: ["Panaji", "Verna"] },

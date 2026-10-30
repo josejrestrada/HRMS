@@ -28,7 +28,7 @@ export type HrDashboard = {
     items: { employeeCode: string; fullName: string; leaveCode: string; startDate: string; endDate: string; days: number; waitingDays: number }[];
   };
   byDepartment: { name: string; count: number }[];
-  attendance: { counts: Record<string, number>; recorded: number; notRecorded: number; offToday: number };
+  attendance: { counts: Record<string, number>; recorded: number; notRecorded: number; offToday: number; notEmployed: number };
   holidays: { date: string; name: string; type: string; verified: boolean; locations: string[] }[];
   recentJoiners: { employeeCode: string; fullName: string; designation: string; location: string; joiningDate: string }[];
   attention: { withoutManager: number; notSignedIn: number; unassigned: number };
@@ -167,7 +167,7 @@ export async function getHrDashboard(actor: Actor | null): Promise<HrDashboard> 
       })),
     },
     byDepartment: byDepartment.map((r) => ({ name: r.name, count: r.count })),
-    attendance: { counts: attendance.counts, recorded: attendance.recorded, notRecorded: attendance.notRecorded, offToday: attendance.offToday },
+    attendance: { counts: attendance.counts, recorded: attendance.recorded, notRecorded: attendance.notRecorded, offToday: attendance.offToday, notEmployed: attendance.notEmployed },
     holidays: holidays.map((r) => ({
       date: r.holiday_date,
       name: r.name,

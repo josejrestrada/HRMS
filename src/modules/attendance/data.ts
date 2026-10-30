@@ -4,15 +4,20 @@ import { DomainError } from "@/shared/errors";
 import { recordAudit } from "@/shared/audit";
 import { ForbiddenError, requireRole, type Actor } from "@/shared/roles";
 import { canDecide } from "@/shared/approvals";
+import { firstLockedMonth, lockedMonthKeys } from "@/shared/periods";
 import { addDays, formatDate, todayIST } from "@/shared/dates";
 import { getDirectReportIds, getWorkforce, isCurrentManagerOf, type WorkforceRow } from "@/modules/employees/data";
 import { getCalendarFacts } from "@/modules/leave/data";
 import {
+  MONTH_NAMES,
+  canLockMonth,
   canRegularize,
   checkFixTimes,
   defaultFixTimes,
   deriveDay,
+  freezeDay,
   isFixable,
+  isUnpaidFrozen,
   nextPunchDirection,
   summarizeMonth,
   type DayResult,
@@ -31,6 +36,17 @@ const DEFAULT_POLICY: Policy = {
   halfDayMinutes: 270,
   lateMarksPerDeduction: 3,
   regularizeUntilDay: 5,
+};
+
+type FrozenRow = {
+  employee_id: string;
+  d: string;
+  status: DayResult["status"];
+  worked_minutes: number | null;
+  late: boolean;
+  note: string | null;
+  first_in: string | null;
+  last_out: string | null;
 };
 
 export type DayRow = {
@@ -53,6 +69,8 @@ export type MyAttendance = {
   todayIn: string | null;
   todayOut: string | null;
   canPunch: boolean;
+  /** HR has locked this month: it cannot be changed (R60). */
+  locked: boolean;
   /** Days that need action and can still be fixed, with the times to prefill. */
   fixable: { date: string; status: string; note: string | null }[];
   /** Days that need action but are past the deadline: they count as unpaid (R55). */
@@ -91,6 +109,8 @@ export type DaySheet = {
   counts: Record<string, number>;
   notCheckedIn: number;
   late: number;
+  /** Active employees who had not joined yet (or had left) on this date. */
+  notEmployed: number;
 };
 
 export type DaySummary = {
@@ -99,6 +119,8 @@ export type DaySummary = {
   recorded: number;
   notRecorded: number;
   offToday: number;
+  /** Not yet joined or already left on this date: not expected, not absent (R61). */
+  notEmployed: number;
 };
 
 function requireEmployee(actor: Actor | null): asserts actor is Actor {
@@ -122,13 +144,14 @@ async function deriveRange(
   from: string,
   to: string,
   q: Queryable,
+  opts: { period?: boolean; ignoreFrozen?: boolean } = {},
 ): Promise<{ workforce: WorkforceRow[]; days: Map<string, DayResult[]>; policies: Map<string, Policy> }> {
   const today = todayIST();
-  const workforce = await getWorkforce(actor, employeeIds, from, q);
+  const workforce = await getWorkforce(actor, employeeIds, from, q, opts.period ? { from, to } : undefined);
   const ids = workforce.map((w) => w.id);
   const locationIds = [...new Set(workforce.map((w) => w.locationId).filter((l): l is string => !!l))];
 
-  const [policyRows, punchRows, facts, fixRows] = await Promise.all([
+  const [policyRows, punchRows, facts, fixRows, frozenRows] = await Promise.all([
     q.query<{
       location_id: string;
       work_start: string;
@@ -164,7 +187,18 @@ async function deriveRange(
             where employee_id = any($1::uuid[]) and status in ('pending', 'approved') and work_date between $2::date and $3::date`,
           [ids, from, to],
         ),
+    ids.length === 0 || opts.ignoreFrozen
+      ? Promise.resolve([] as FrozenRow[])
+      : q.query<FrozenRow>(
+          `select employee_id, work_date::text as d, status, worked_minutes, late, note,
+                  to_char(first_in at time zone 'Asia/Kolkata', 'HH24:MI') as first_in,
+                  to_char(last_out at time zone 'Asia/Kolkata', 'HH24:MI') as last_out
+             from attendance_day
+            where locked and employee_id = any($1::uuid[]) and work_date between $2::date and $3::date`,
+          [ids, from, to],
+        ),
   ]);
+  const frozenBy = new Map(frozenRows.map((f) => [`${f.employee_id}|${f.d}`, f]));
   const fixBy = new Map(fixRows.map((f) => [`${f.employee_id}|${f.d}`, { in: f.in_time, out: f.out_time, status: f.status }]));
 
   const policies = new Map<string, Policy>(
@@ -197,8 +231,27 @@ async function deriveRange(
     days.set(
       w.id,
       dates.map((date) => {
+        const frozen = frozenBy.get(`${w.id}|${date}`);
+        if (frozen) {
+          return {
+            date,
+            status: frozen.status,
+            firstIn: frozen.first_in,
+            lastOut: frozen.last_out,
+            workedMinutes: frozen.worked_minutes,
+            late: frozen.late,
+            needsAction: false,
+            provisional: false,
+            regularized: false,
+            fixPending: false,
+            employed: true,
+            locked: true,
+            note: frozen.note,
+          } satisfies DayResult;
+        }
         const leave = (leaveBy.get(w.id) ?? []).find((l) => l.start <= date && l.end >= date);
         return deriveDay({
+          employed: date >= w.joiningDate && (!w.exitDate || date <= w.exitDate),
           date,
           today,
           weeklyOff: w.weeklyOffDays.includes(new Date(`${date}T00:00:00Z`).getUTCDay()),
@@ -238,9 +291,10 @@ export async function getMyAttendance(actor: Actor | null, year: number, month: 
   const ins = punches.filter((p) => p.direction === "in").map((p) => p.time);
   const outs = punches.filter((p) => p.direction === "out").map((p) => p.time);
 
+  const locked = (await lockedMonthKeys(from, to, q)).has(`${year}-${String(month).padStart(2, "0")}`);
   const fixable: MyAttendance["fixable"] = [];
   const pastDeadline: MyAttendance["pastDeadline"] = [];
-  for (const d of list) {
+  for (const d of locked ? [] : list) {
     if (!isFixable(d)) continue;
     const ok = canRegularize({ date: d.date, today, regularizeUntilDay: policy.regularizeUntilDay });
     if (ok.ok) fixable.push({ date: d.date, status: d.status, note: d.note });
@@ -257,7 +311,8 @@ export async function getMyAttendance(actor: Actor | null, year: number, month: 
     next: nextPunchDirection(punches),
     todayIn: ins[0] ?? null,
     todayOut: outs[outs.length - 1] ?? null,
-    canPunch: !!me, // only active employees come back from the workforce lookup
+    canPunch: !!me && !locked, // only active employees come back from the workforce lookup
+    locked,
     fixable,
     pastDeadline,
     defaults: defaultFixTimes(policy),
@@ -314,12 +369,14 @@ export async function getDaySheet(actor: Actor | null, date: string, q: Queryabl
   const counts: Record<string, number> = {};
   let notCheckedIn = 0;
   let late = 0;
+  let notEmployed = 0;
   for (const r of rows) {
-    if (r.day.provisional && r.day.status === "absent") notCheckedIn += 1;
+    if (!r.day.employed) notEmployed += 1;
+    else if (r.day.provisional && r.day.status === "absent") notCheckedIn += 1;
     else counts[r.day.status] = (counts[r.day.status] ?? 0) + 1;
     if (r.day.late) late += 1;
   }
-  return { date, rows, counts, notCheckedIn, late };
+  return { date, rows, counts, notCheckedIn, late, notEmployed };
 }
 
 /** HR: the numbers for the dashboard. */
@@ -334,7 +391,7 @@ export async function getDaySummary(actor: Actor | null, date: string): Promise<
     absent: (sheet.counts.absent ?? 0) + (sheet.counts.missed_punch ?? 0),
   };
   const recorded = Object.values(counts).reduce((a, b) => a + b, 0);
-  return { total: sheet.rows.length, counts, recorded, notRecorded: sheet.notCheckedIn, offToday: off };
+  return { total: sheet.rows.length, counts, recorded, notRecorded: sheet.notCheckedIn, offToday: off, notEmployed: sheet.notEmployed };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -383,6 +440,12 @@ export async function requestRegularizationsTx(tx: Queryable, actor: Actor | nul
   if (input.items.length > 31) throw new DomainError("You can fix at most 31 days at a time.");
   const dates = input.items.map((i) => i.date);
   if (new Set(dates).size !== dates.length) throw new DomainError("The same day was chosen twice.");
+
+  const lockedMonth = await firstLockedMonth(tx, dates);
+  if (lockedMonth) {
+    const [y, m] = lockedMonth.split("-").map(Number);
+    throw new DomainError(`${MONTH_NAMES[m - 1]} ${y} is locked, so its days can no longer be fixed. Please talk to HR.`);
+  }
 
   const from = [...dates].sort()[0];
   const to = [...dates].sort()[dates.length - 1];
@@ -468,6 +531,7 @@ export async function decideRegularizationsTx(
     )[0];
     if (!req) throw new DomainError("That request was not found.");
     if (req.status !== "pending") throw new DomainError("A request has already been decided or cancelled.");
+    if (await firstLockedMonth(tx, [req.d])) throw new DomainError("That month is locked, so this request can no longer be decided.");
     const allowed = canDecide({
       actorEmployeeId: actor.employeeId,
       actorIsHrAdmin: isHr,
@@ -550,4 +614,188 @@ export async function getAttendanceApprovalScope(actor: Actor | null): Promise<{
   const canApprove = isHr || reports.length > 0;
   if (!canApprove) return { canApprove, pending: 0 };
   return { canApprove, pending: (await listRegularizationApprovals(actor)).length };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Month lock (HR): freeze a finished month (R58 to R62)
+// ---------------------------------------------------------------------------------------------
+
+export type MonthLockRow = {
+  month: number;
+  state: "locked" | "open" | "future";
+  lockedAt: string | null;
+  lockedBy: string | null;
+  employees: number | null;
+};
+
+export type LockPreview = {
+  year: number;
+  month: number;
+  label: string;
+  employees: number;
+  days: number;
+  unpaidDays: number;
+  unpaidPeople: { code: string; name: string; days: number }[];
+  pendingFixes: number;
+  /** Employees can still send fixes for this month (the deadline has not passed). */
+  beforeDeadline: boolean;
+  alreadyLocked: boolean;
+  blockers: string[];
+  canLock: boolean;
+};
+
+export type LockResult = { year: number; month: number; employees: number; days: number; unpaidDays: number };
+
+const lastDayOf = (year: number, month: number) => new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+export async function getLockOverview(actor: Actor | null, year: number): Promise<MonthLockRow[]> {
+  requireRole(actor, "hr_admin");
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new DomainError("Choose a valid year.");
+  const today = todayIST();
+  const rows = await query<{ month: number; locked_at: string; locked_by_name: string; employee_count: number }>(
+    `select p.month, p.locked_at::text, e.full_name as locked_by_name, p.employee_count
+       from attendance_period p join employee e on e.id = p.locked_by where p.year = $1`,
+    [year],
+  );
+  const lockedBy = new Map(rows.map((r) => [r.month, r]));
+  return Array.from({ length: 12 }, (_, i) => {
+    const month = i + 1;
+    const row = lockedBy.get(month);
+    if (row) return { month, state: "locked" as const, lockedAt: row.locked_at, lockedBy: row.locked_by_name, employees: row.employee_count };
+    const done = canLockMonth({ today, year, month }).ok;
+    return { month, state: done ? ("open" as const) : ("future" as const), lockedAt: null, lockedBy: null, employees: null };
+  });
+}
+
+async function planLock(actor: Actor, year: number, month: number, q: Queryable) {
+  const from = `${year}-${String(month).padStart(2, "0")}-01`;
+  const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDayOf(year, month)).padStart(2, "0")}`;
+  const { workforce, days } = await deriveRange(actor, null, from, to, q, { period: true, ignoreFrozen: true });
+  const rows: { employee: WorkforceRow; date: string; frozen: NonNullable<ReturnType<typeof freezeDay>> }[] = [];
+  const unpaid = new Map<string, { code: string; name: string; days: number }>();
+  let unpaidDays = 0;
+  for (const w of workforce) {
+    for (const d of days.get(w.id) ?? []) {
+      const frozen = freezeDay(d);
+      if (!frozen) continue;
+      rows.push({ employee: w, date: d.date, frozen });
+      if (isUnpaidFrozen(frozen)) {
+        unpaidDays += 1;
+        const u = unpaid.get(w.id) ?? { code: w.code, name: w.fullName, days: 0 };
+        u.days += 1;
+        unpaid.set(w.id, u);
+      }
+    }
+  }
+  return { from, to, workforce, rows, unpaidDays, unpaid: [...unpaid.values()].sort((a, b) => b.days - a.days) };
+}
+
+/** Read-only: what locking this month would do, and what stands in the way. */
+export async function previewMonthLock(actor: Actor | null, year: number, month: number, q: Queryable = { query }): Promise<LockPreview> {
+  requireRole(actor, "hr_admin");
+  if (!Number.isInteger(year) || year < 2000 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12) {
+    throw new DomainError("Choose a valid month.");
+  }
+  const today = todayIST();
+  const label = `${MONTH_NAMES[month - 1]} ${year}`;
+  const plan = await planLock(actor, year, month, q);
+  const pending = await q.query<{ n: number }>(
+    "select count(*)::int as n from regularization where status = 'pending' and work_date between $1::date and $2::date",
+    [plan.from, plan.to],
+  );
+  const alreadyLocked = (await lockedMonthKeys(plan.from, plan.to, q)).has(`${year}-${String(month).padStart(2, "0")}`);
+  const timing = canLockMonth({ today, year, month });
+  const blockers: string[] = [];
+  if (alreadyLocked) blockers.push(`${label} is already locked.`);
+  if (!timing.ok) blockers.push(timing.error);
+  if (pending[0].n > 0) {
+    blockers.push(`${pending[0].n} ${pending[0].n === 1 ? "fix is" : "fixes are"} still waiting for approval. Decide them first.`);
+  }
+  const policyDay = DEFAULT_POLICY.regularizeUntilDay;
+  const lastDay = plan.to;
+  return {
+    year,
+    month,
+    label,
+    employees: plan.workforce.length,
+    days: plan.rows.length,
+    unpaidDays: plan.unpaidDays,
+    unpaidPeople: plan.unpaid.slice(0, 15),
+    pendingFixes: pending[0].n,
+    beforeDeadline: canRegularize({ date: lastDay, today, regularizeUntilDay: policyDay }).ok,
+    alreadyLocked,
+    blockers,
+    canLock: blockers.length === 0,
+  };
+}
+
+export async function lockMonthTx(tx: Queryable, actor: Actor | null, input: { year: number; month: number }): Promise<LockResult> {
+  requireRole(actor, "hr_admin");
+  const { year, month } = input;
+  if (!Number.isInteger(year) || year < 2000 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12) {
+    throw new DomainError("Choose a valid month.");
+  }
+  const label = `${MONTH_NAMES[month - 1]} ${year}`;
+  const timing = canLockMonth({ today: todayIST(), year, month });
+  if (!timing.ok) throw new DomainError(timing.error);
+
+  const from = `${year}-${String(month).padStart(2, "0")}-01`;
+  const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDayOf(year, month)).padStart(2, "0")}`;
+  if ((await lockedMonthKeys(from, to, tx)).has(`${year}-${String(month).padStart(2, "0")}`)) {
+    throw new DomainError(`${label} is already locked.`);
+  }
+  const pending = await tx.query<{ n: number }>(
+    "select count(*)::int as n from regularization where status = 'pending' and work_date between $1::date and $2::date",
+    [from, to],
+  );
+  if (pending[0].n > 0) {
+    throw new DomainError(`${pending[0].n} ${pending[0].n === 1 ? "fix is" : "fixes are"} still waiting for approval. Decide them before locking ${label}.`);
+  }
+
+  const plan = await planLock(actor, year, month, tx);
+  const stamp = (date: string, hm: string | null) => (hm ? `${date}T${hm}:00+05:30` : null);
+  if (plan.rows.length > 0) {
+    await tx.query(
+      `insert into attendance_day (employee_id, work_date, status, first_in, last_out, worked_minutes, late, locked, note)
+       select employee_id, work_date, status, first_in, last_out, worked_minutes, late, true, note
+         from unnest($1::uuid[], $2::date[], $3::text[], $4::timestamptz[], $5::timestamptz[], $6::int[], $7::boolean[], $8::text[])
+              as t(employee_id, work_date, status, first_in, last_out, worked_minutes, late, note)
+       on conflict (employee_id, work_date) do update
+         set status = excluded.status, first_in = excluded.first_in, last_out = excluded.last_out,
+             worked_minutes = excluded.worked_minutes, late = excluded.late, locked = true, note = excluded.note
+         where attendance_day.locked = false`,
+      [
+        plan.rows.map((r) => r.employee.id),
+        plan.rows.map((r) => r.date),
+        plan.rows.map((r) => r.frozen.status),
+        plan.rows.map((r) => stamp(r.date, r.frozen.firstIn)),
+        plan.rows.map((r) => stamp(r.date, r.frozen.lastOut)),
+        plan.rows.map((r) => r.frozen.workedMinutes),
+        plan.rows.map((r) => r.frozen.late),
+        plan.rows.map((r) => r.frozen.note),
+      ],
+    );
+  }
+  await tx.query("insert into attendance_period (year, month, locked_by, employee_count) values ($1, $2, $3, $4)", [
+    year,
+    month,
+    actor.employeeId,
+    plan.workforce.length,
+  ]);
+  await recordAudit(
+    {
+      actorEmployeeId: actor.employeeId,
+      action: "attendance_month_locked",
+      entity: "attendance_period",
+      entityId: `${year}-${String(month).padStart(2, "0")}`,
+      summary: `${label}: ${plan.workforce.length} people, ${plan.rows.length} days, ${plan.unpaidDays} unpaid`,
+    },
+    tx,
+  );
+  return { year, month, employees: plan.workforce.length, days: plan.rows.length, unpaidDays: plan.unpaidDays };
+}
+
+export async function lockMonth(actor: Actor | null, input: { year: number; month: number }) {
+  requireRole(actor, "hr_admin");
+  return transaction((tx) => lockMonthTx(tx, actor, input));
 }

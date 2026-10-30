@@ -38,6 +38,8 @@ export type DayInput = {
   punches: PunchTime[];
   policy: Policy;
   regularization?: Regularization | null;
+  /** False for a day before the employee joined or after they left (R61). Defaults to true. */
+  employed?: boolean;
 };
 
 export type DayResult = {
@@ -54,6 +56,10 @@ export type DayResult = {
   regularized: boolean;
   /** A regularization has been sent and is waiting for approval. */
   fixPending: boolean;
+  /** False when the day is outside the person's employment (R61). */
+  employed: boolean;
+  /** The day comes from the frozen copy of a locked month (R58). */
+  locked: boolean;
   note: string | null;
 };
 
@@ -113,9 +119,13 @@ export function deriveDay(i: DayInput): DayResult {
     provisional: false,
     regularized: !!approved,
     fixPending: i.regularization?.status === "pending",
+    employed: true,
+    locked: false,
     note: null,
     ...extra,
   });
+
+  if (i.employed === false) return result("upcoming", { employed: false, note: "Not employed on this day" });
 
   // A holiday or weekly off wins over everything else (R43).
   if (i.holiday) return result("holiday", { note: i.holiday });
@@ -231,3 +241,47 @@ export function defaultFixTimes(policy: Policy): { in: string; out: string } {
   const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
   return { in: hhmm(start), out: hhmm(end) };
 }
+
+// ---------------------------------------------------------------------------------------------
+// Month lock (R58 to R62)
+// ---------------------------------------------------------------------------------------------
+
+export type FrozenDay = {
+  status: Exclude<DayStatus, "upcoming" | "missed_punch">;
+  note: string | null;
+  late: boolean;
+  firstIn: string | null;
+  lastOut: string | null;
+  workedMinutes: number | null;
+};
+
+/**
+ * What is stored when a month is locked (R59). A day that still needs action becomes absent, which
+ * is unpaid. Days outside employment, and days that cannot be judged, are not stored (null).
+ */
+export function freezeDay(d: DayResult): FrozenDay | null {
+  if (!d.employed || d.status === "upcoming") return null;
+  const base = { late: d.late, firstIn: d.firstIn, lastOut: d.lastOut, workedMinutes: d.workedMinutes };
+  if (d.status === "missed_punch") {
+    return { ...base, status: "absent", note: "Missing check-out, not fixed in time (unpaid)" };
+  }
+  if (d.status === "absent" && d.needsAction) {
+    return { ...base, status: "absent", note: `${d.note ?? "Absent"}, not fixed in time (unpaid)` };
+  }
+  return { ...base, status: d.status, note: d.note };
+}
+
+/** True for a frozen day that was left unfixed and so counts as unpaid. */
+export const isUnpaidFrozen = (f: FrozenDay) => f.status === "absent" && !!f.note?.includes("not fixed in time");
+
+export type LockCheck = { ok: true } | { ok: false; error: string };
+
+/** R58: only a finished month can be locked. */
+export function canLockMonth(i: { today: string; year: number; month: number }): LockCheck {
+  const last = new Date(Date.UTC(i.year, i.month, 0)).getUTCDate();
+  const end = `${i.year}-${String(i.month).padStart(2, "0")}-${String(last).padStart(2, "0")}`;
+  if (i.today <= end) return { ok: false, error: `${MONTH_NAMES[i.month - 1]} ${i.year} can only be locked after it has ended.` };
+  return { ok: true };
+}
+
+export { MONTH_NAMES };

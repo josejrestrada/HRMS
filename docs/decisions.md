@@ -31,6 +31,20 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## Accepted
 
+## 2026-10-31 - Attendance: month lock
+- **Status:** Accepted (2026-10-31, owner: "next: month lock"). Completes the attendance design in "Attendance module" and "regularization" (R28, P9).
+- **What it does (HR admin, Attendance > Month lock):** closes a finished month. It stores a **frozen copy** of every day for everyone who worked at Konkan Coastal Foods during that month (`attendance_day`, `locked = true`) and records the lock (`attendance_period`: who, when, how many people). Payroll reads the frozen copy.
+- **Unfixed days become unpaid (R28):** at lock, a day that still needs action (a missed check-out, no check-in, a short day) is stored as **absent**, with a note that it was not fixed in time. Absent without leave is unpaid.
+- **When a month can be locked:** only after it has ended. Before locking, HR sees a **preview**: how many people, how many days will become unpaid, and any **fixes still waiting for approval**. Waiting fixes **block** the lock, so nobody loses a day because a manager was slow. HR can also lock before the fix deadline (the 5th), and the preview warns that employees can no longer fix those days.
+- **No unlock in the app.** A locked month is final. Corrections will be made with a later adjustment (not built). This is deliberate: payroll depends on it.
+- **After a lock (enforced by the database, not only by the pages):** no punch can be added for that month, no fix can be sent, approved or changed for it, and the frozen rows cannot be edited or deleted. The lock record itself cannot be changed.
+- **Reading a locked month:** My attendance, Team today and the dashboard read the frozen copy, so cancelling a leave or any later change does not alter a closed month. A locked month shows a "Locked" note and offers no fixes.
+- **Leave interplay (P9):** leave cannot be applied for or approved for dates in a locked month; an approved leave that overlaps a locked month can only be cancelled by an HR admin.
+- **Joining and leaving dates:** days before someone joined, or after they left, are not "absent": they are outside their employment and are not stored. This also fixes the calendar for new joiners, which used to show absent days before the joining date. The lock includes people who left during the month.
+- **Test data:** the seeded attendance rows for one day are replaced by the lock, because they are not locked.
+- **Not in this slice:** unlocking or adjustments, a payroll export, work-from-home requests, scheduled reminders to lock, and locking by location.
+- **Clarifications added to RESEARCH.md as R58 to R62.**
+
 ## 2026-10-30 - Attendance: regularization (single and bulk)
 - **Status:** Accepted (2026-10-30, owner: "next: regularization"). Implements R28 and the "Days to fix" part of DESIGN 4.6 and 4.7.
 - **What an employee can do:** from **My attendance**, tick one or more days that need fixing (a missed check-out, no check-in, or a short day), type the real check-in and check-out time for each, give **one reason for all of them**, and send once. Each day becomes its own request, grouped by a shared batch, so a manager can approve a whole batch together or a single day.

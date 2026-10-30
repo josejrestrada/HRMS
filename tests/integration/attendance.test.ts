@@ -156,6 +156,7 @@ describe.skipIf(!enabled)("Attendance against the database", () => {
     if (!hrRow) return;
     const hr: TestActor = { employeeId: hrRow.id, employeeCode: hrRow.employee_code, fullName: hrRow.full_name, roles: ["employee", "hr_admin"] };
     const s = await attendance.getDaySummary(hr, "2026-10-05");
-    expect(s.recorded + s.notRecorded + s.offToday).toBe(s.total);
+    // Everyone is recorded, not in yet, off that day, or not employed yet (R61).
+    expect(s.recorded + s.notRecorded + s.offToday + s.notEmployed).toBe(s.total);
   });
 });
