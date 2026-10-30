@@ -7,7 +7,8 @@ export type JsonSchema = {
   additionalProperties?: boolean;
 };
 
-export type ToolCall = { id: string; name: string; args: Record<string, unknown> };
+// `signature` is an opaque value some providers (Gemini 3) require to be sent back with the call.
+export type ToolCall = { id: string; name: string; args: Record<string, unknown>; signature?: string };
 
 export type ChatMessage =
   | { role: "user"; content: string }

@@ -1,11 +1,18 @@
 import { ProviderError, type ChatMessage, type LlmProvider, type ProviderResult, type ToolSpec } from "./types";
 
 // Google Gemini through its REST interface. The request and response shapes follow Google's published
-// generateContent format. NOTE: not yet tested against the live service (no key has been set); the
-// converters below are covered by tests with recorded-style fixtures.
+// generateContent format. Checked against the live service with a real key (model gemini-3.5-flash).
 
-type GeminiPart = { text?: string; functionCall?: { name: string; args?: Record<string, unknown> }; functionResponse?: { name: string; response: Record<string, unknown> } };
+type GeminiPart = { text?: string; thoughtSignature?: string; functionCall?: { name: string; args?: Record<string, unknown> }; functionResponse?: { name: string; response: Record<string, unknown> } };
 type GeminiContent = { role: "user" | "model"; parts: GeminiPart[] };
+
+// Gemini does not accept `additionalProperties`, and a tool with no arguments must leave `parameters` out.
+// (Our own strict validation still rejects unknown arguments before any tool runs.)
+function declaration(t: ToolSpec) {
+  const { additionalProperties: _ignored, ...schema } = t.parameters;
+  void _ignored;
+  return { name: t.name, description: t.description, ...(Object.keys(schema.properties).length > 0 ? { parameters: schema } : {}) };
+}
 
 export function toGeminiRequest(input: { system: string; messages: ChatMessage[]; tools: ToolSpec[] }) {
   const contents: GeminiContent[] = [];
@@ -15,7 +22,7 @@ export function toGeminiRequest(input: { system: string; messages: ChatMessage[]
     } else if (m.role === "assistant") {
       const parts: GeminiPart[] = [];
       if (m.content) parts.push({ text: m.content });
-      for (const c of m.toolCalls ?? []) parts.push({ functionCall: { name: c.name, args: c.args } });
+      for (const c of m.toolCalls ?? []) parts.push({ functionCall: { name: c.name, args: c.args }, ...(c.signature ? { thoughtSignature: c.signature } : {}) });
       if (parts.length > 0) contents.push({ role: "model", parts });
     } else {
       // Tool results go back as one "user" turn; consecutive results share a turn.
@@ -29,7 +36,7 @@ export function toGeminiRequest(input: { system: string; messages: ChatMessage[]
     systemInstruction: { parts: [{ text: input.system }] },
     contents,
     ...(input.tools.length > 0
-      ? { tools: [{ functionDeclarations: input.tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })) }] }
+      ? { tools: [{ functionDeclarations: input.tools.map(declaration) }] }
       : {}),
     generationConfig: { temperature: 0.2, maxOutputTokens: 700 },
   };
@@ -43,7 +50,7 @@ export function fromGeminiResponse(body: unknown): ProviderResult {
   const text = parts.map((p) => p.text ?? "").join("").trim();
   const toolCalls = parts
     .filter((p) => p.functionCall)
-    .map((p, i) => ({ id: `call_${i}`, name: p.functionCall!.name, args: (p.functionCall!.args ?? {}) as Record<string, unknown> }));
+    .map((p, i) => ({ id: `call_${i}`, name: p.functionCall!.name, args: (p.functionCall!.args ?? {}) as Record<string, unknown>, ...(p.thoughtSignature ? { signature: p.thoughtSignature } : {}) }));
   if (!text && toolCalls.length === 0) throw new ProviderError(`Gemini returned an empty answer (${candidate.finishReason ?? "no reason"})`);
   return { text: text || null, toolCalls };
 }

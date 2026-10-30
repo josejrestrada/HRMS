@@ -108,3 +108,25 @@ describe("getProvider", () => {
     expect(getProvider({ GEMINI_API_KEY: "g", AGENT_MODEL: "my-model" })?.name).toBe("gemini");
   });
 });
+
+describe("Gemini live-service findings", () => {
+  const spec = (parameters: any) => ({ name: "t", description: "d", parameters });
+
+  it("leaves out additionalProperties, and leaves parameters out for tools with no arguments", () => {
+    const req = toGeminiRequest({
+      system: "s",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [spec({ type: "object", properties: {}, additionalProperties: false }), spec({ type: "object", properties: { month: { type: "string" } }, additionalProperties: false })],
+    });
+    const [none, withArg] = req.tools![0].functionDeclarations as any[];
+    expect(none.parameters).toBeUndefined();
+    expect(withArg.parameters).toEqual({ type: "object", properties: { month: { type: "string" } } });
+  });
+
+  it("sends back the thought signature that came with a tool call", () => {
+    const result = fromGeminiResponse({ candidates: [{ content: { parts: [{ functionCall: { name: "t", args: {} }, thoughtSignature: "sig" }] } }] });
+    expect(result.toolCalls[0].signature).toBe("sig");
+    const req = toGeminiRequest({ system: "s", messages: [{ role: "user", content: "hi" }, { role: "assistant", content: "", toolCalls: result.toolCalls }], tools: [] });
+    expect((req.contents[1].parts[0] as any).thoughtSignature).toBe("sig");
+  });
+});

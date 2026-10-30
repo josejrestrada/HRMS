@@ -3,7 +3,7 @@ import { createGroqProvider } from "./groq";
 import type { LlmProvider } from "./types";
 
 // Defaults are starting points, not verified against the live services. Set AGENT_MODEL to override.
-export const DEFAULT_MODELS = { gemini: "gemini-2.0-flash", groq: "llama-3.3-70b-versatile" } as const;
+export const DEFAULT_MODELS = { gemini: "gemini-3.5-flash", groq: "llama-3.3-70b-versatile" } as const;
 
 /**
  * The configured model provider, or null if none is set up. AGENT_PROVIDER picks "gemini" or "groq";

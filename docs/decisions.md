@@ -339,3 +339,11 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 - Confirm which Goa Act applies (1973 or 2025) and its commencement date.
 - Replace the tentative 2026 holiday list with the official Goa notification.
 - Check Factories Act applicability for the Verna plant.
+
+## 2026-10-30: Assistant model default is gemini-3.5-flash
+
+First live check of the Gemini provider. gemini-2.0-flash has been retired. gemini-3.8-flash answered but was
+overloaded (timeouts), so the default is gemini-3.5-flash (about 5 s for a small answer; gemini-3.1-flash-lite
+was about 1 s). Gemini rejects `additionalProperties` in tool schemas and needs the returned thought signature sent
+back with a tool call; both are handled in `gemini.ts`. Our own strict validation still rejects unknown arguments.
+Override with AGENT_MODEL. Groq is still untested live. Plan and data-handling terms are still to be decided.
