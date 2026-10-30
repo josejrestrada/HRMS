@@ -140,6 +140,8 @@ describe.skipIf(!enabled)("Month lock against the database", () => {
       await leaveRow(lopId, D(11), D(13), 3, 3); // Tue to Thu: leave without pay, 3 days
       await leaveRow(elId, D(17), D(21), 5, 2.5); // Mon to Fri: 5 days, the last 2.5 unpaid
       await leaveRow(lopId, D(25), D(25), 0.5, 0.5, "second_half"); // Tue 25 Mar: half a day without pay
+      await punch(c, me, D(25), "09:20", "in");
+      await punch(c, me, D(25), "13:40", "out"); // the other half is worked, so only the leave half is unpaid
 
       const unpaid = async () =>
         Object.fromEntries((await c.query("select work_date::text as d, status, unpaid_days::float8 as u from attendance_day where employee_id = $1", [me.employeeId])).rows.map((r) => [r.d, r]));

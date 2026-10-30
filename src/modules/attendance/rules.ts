@@ -67,6 +67,8 @@ export type DayResult = {
   note: string | null;
 };
 
+export const HALF_DAY_LEAVE_NOT_WORKED = "Half-day leave, other half not worked";
+
 export function toMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
   return h * 60 + m;
@@ -138,7 +140,14 @@ export function deriveDay(i: DayInput): DayResult {
 
   // Leave beats punches (R43, P9). Half-day leave shows as a half day.
   if (i.leave === "full") return result("leave", { unpaid: i.unpaidLeave ?? 0 });
-  if (i.leave) return result("half_day", { note: "Half-day leave", unpaid: i.unpaidLeave ?? 0 });
+  if (i.leave) {
+    // The other half of the day still has to be worked (half a day's attendance, finding 4). Until
+    // the day is over, or once a fix is approved, it is not held against the person.
+    const leaveUnpaid = i.unpaidLeave ?? 0;
+    const workedOtherHalf = (workedMinutes ?? 0) >= Math.round(i.policy.fullDayMinutes / 2);
+    if (i.date >= i.today || workedOtherHalf || approved) return result("half_day", { note: "Half-day leave", unpaid: leaveUnpaid });
+    return result("half_day", { needsAction: true, note: HALF_DAY_LEAVE_NOT_WORKED, unpaid: Math.min(leaveUnpaid + 0.5, 1) });
+  }
   if (i.wfh) return result("wfh", { note: "Work from home" });
 
   if (i.date > i.today) return result("upcoming");
@@ -276,6 +285,10 @@ export function freezeDay(d: DayResult): FrozenDay | null {
   if (d.status === "absent") {
     const unfixed = d.needsAction;
     return { ...base, status: "absent", unpaid: 1, note: unfixed ? `${d.note ?? "Absent"}, not fixed in time (unpaid)` : `${d.note ?? "Absent"} (unpaid)` };
+  }
+  if (d.status === "half_day" && d.note === HALF_DAY_LEAVE_NOT_WORKED) {
+    const unpaid = Math.min(Math.max(d.unpaid, 0.5), 1);
+    return { ...base, status: "half_day", unpaid, note: `${d.note}, not fixed in time (unpaid)` };
   }
   if (d.status === "leave" || (d.status === "half_day" && d.note === "Half-day leave")) {
     const unpaid = Math.min(Math.max(d.unpaid, 0), d.status === "half_day" ? 0.5 : 1);

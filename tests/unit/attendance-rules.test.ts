@@ -129,6 +129,24 @@ describe("deriveDay (R27, R43, R44)", () => {
     expect(deriveDay(day({ leave: "first_half" })).status).toBe("half_day");
   });
 
+  it("expects the other half of a half-day leave to be worked (review finding 4)", () => {
+    // Past day, nothing worked: the other half is unpaid and the day can still be fixed.
+    expect(deriveDay(day({ leave: "first_half" }))).toMatchObject({ status: "half_day", needsAction: true, unpaid: 0.5, note: "Half-day leave, other half not worked" });
+    // Worked half a day (4 hours) or more: complete, nothing unpaid.
+    expect(deriveDay(day({ leave: "second_half", punches: inOut("09:30", "13:30") }))).toMatchObject({ status: "half_day", needsAction: false, unpaid: 0, note: "Half-day leave" });
+    // Not held against the person while the day is still going, or after an approved fix.
+    expect(deriveDay(day({ date: "2026-10-30", leave: "first_half" }))).toMatchObject({ needsAction: false, unpaid: 0 });
+    expect(deriveDay(day({ leave: "first_half", regularization: { status: "approved", in: "09:30", out: "13:30" } }))).toMatchObject({ needsAction: false, unpaid: 0 });
+    // Unpaid leave on that half plus an unworked other half is a whole unpaid day, never more.
+    expect(deriveDay(day({ leave: "first_half", unpaidLeave: 0.5 })).unpaid).toBe(1);
+  });
+
+  it("freezes an unworked other half as half a day unpaid", () => {
+    expect(freezeDay(deriveDay(day({ leave: "first_half" })))).toMatchObject({ status: "half_day", unpaid: 0.5 });
+    expect(freezeDay(deriveDay(day({ leave: "first_half", unpaidLeave: 0.5 })))).toMatchObject({ unpaid: 1 });
+    expect(freezeDay(deriveDay(day({ leave: "first_half", punches: inOut("13:00", "17:30") })))).toMatchObject({ status: "half_day", unpaid: 0 });
+  });
+
   it("counts approved work from home as its own present-like status", () => {
     expect(deriveDay(day({ wfh: true })).status).toBe("wfh");
   });
@@ -294,8 +312,9 @@ describe("freezeDay (R59, R64)", () => {
   it("carries the unpaid part of leave: whole, half, partly and none", () => {
     expect(freezeDay(deriveDay(day({ leave: "full", unpaidLeave: 1 })))).toMatchObject({ status: "leave", unpaid: 1 });
     expect(freezeDay(deriveDay(day({ leave: "full", unpaidLeave: 0.5 })))).toMatchObject({ status: "leave", unpaid: 0.5 });
-    expect(freezeDay(deriveDay(day({ leave: "first_half", unpaidLeave: 0.5 })))).toMatchObject({ status: "half_day", unpaid: 0.5 });
-    expect(freezeDay(deriveDay(day({ leave: "first_half" })))).toMatchObject({ status: "half_day", unpaid: 0 });
+    const worked = inOut("13:00", "17:30");
+    expect(freezeDay(deriveDay(day({ leave: "first_half", unpaidLeave: 0.5, punches: worked })))).toMatchObject({ status: "half_day", unpaid: 0.5 });
+    expect(freezeDay(deriveDay(day({ leave: "first_half", punches: worked })))).toMatchObject({ status: "half_day", unpaid: 0 });
     expect(freezeDay(deriveDay(day({ leave: "full", unpaidLeave: 5 })))!.unpaid).toBe(1); // never more than a whole day
   });
 });

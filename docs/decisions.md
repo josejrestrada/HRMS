@@ -397,3 +397,17 @@ The three buttons on the HR dashboard were disabled placeholders ("Soon"). They 
 - **CSV safety:** values are quoted and escaped; a cell starting with `=`, `+`, `-` or `@` gets a leading apostrophe so spreadsheets do not run it as a formula.
   Reports hold no Aadhaar, PAN or bank data. Every download is written to the audit log.
 - **Same people in every report:** Headcount and Leave balances both list every active employee, even one with no current assignment (department, location and type are then blank).
+
+## 2026-10-30: Owner decisions accepted
+
+- **Status:** Accepted (2026-10-30). The owner accepted the recommended value for each open item.
+- **Half-day leave (review finding 4) is now half a day of leave and half a day of attendance.** The other half of the day must be worked (at least half of the full-day
+  minutes, 4 hours with the current policy). On a past day with less than that, the other half is unpaid (0.5), the day shows "Half-day leave, other half not worked"
+  and can still be fixed by regularization before the deadline; once the month is locked it is frozen as half a day unpaid. Today's date and a day with an approved fix are
+  never held against the person. Unpaid leave on the leave half plus an unworked other half is one whole unpaid day, never more.
+  Leave balances were already right (a half-day request weighs 0.5); only attendance changed.
+- **Kept as they are:** attendance policy values (09:30 start, 15-minute grace, 8 h full day, 4.5 h half day, fixes until the 5th, 3 late marks per deduction);
+  half a day of attendance is paid in full; comp-off must be used within 30 days; 180 days between deliveries; the earned-leave accrual formula (R35);
+  the 80-day maternity rule; the work-from-home defaults; HR-only reports with downloads audited.
+- **Still to do outside the code:** HR should check one employee's earned-leave balance against the formula, confirm the 180-day gap, and confirm the 80-day rule with Goa HR.
+  Real employee data must not go into the Assistant until a paid or Workspace Gemini plan (or another provider with suitable data terms) is in place.
