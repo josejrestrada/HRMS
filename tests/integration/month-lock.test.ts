@@ -25,6 +25,8 @@ describe.skipIf(!enabled)("Month lock against the database", () => {
   let ForbiddenError: typeof import("@/shared/roles").ForbiddenError;
   let pnj: string;
   let clId: string;
+  let lopId: string;
+  let elId: string;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -34,6 +36,8 @@ describe.skipIf(!enabled)("Month lock against the database", () => {
     ({ ForbiddenError } = await import("@/shared/roles"));
     pnj = (await pool.query("select id from location where code = 'PNJ'")).rows[0].id;
     clId = (await pool.query("select id from leave_type where code = 'CL'")).rows[0].id;
+    lopId = (await pool.query("select id from leave_type where code = 'LOP'")).rows[0].id;
+    elId = (await pool.query("select id from leave_type where code = 'EL'")).rows[0].id;
   });
   afterAll(async () => {
     await pool.end();
@@ -118,6 +122,47 @@ describe.skipIf(!enabled)("Month lock against the database", () => {
 
       const period = (await c.query("select year, month, locked_by::text as by from attendance_period where year = $1 and month = $2", [Y, M])).rows;
       expect(period).toEqual([{ year: Y, month: M, by: hr.employeeId }]);
+    });
+  });
+
+  it("stores how much of each day is unpaid: absent days, leave without pay, and the converted shortfall of a leave request", async () => {
+    await inTx(async (c, tx) => {
+      const hr = await person(c, "TESTDB-HR", { roles: ["hr_admin"] });
+      const me = await person(c, "TESTDB-E");
+      const leaveRow = (type: string, start: string, end: string, days: number, lop: number, part = "full") =>
+        c.query(
+          "insert into leave_request (employee_id, leave_type_id, start_date, end_date, day_part, days, lop_days, status) values ($1, $2, $3, $4, $5, $6, $7, 'approved')",
+          [me.employeeId, type, start, end, part, days, lop],
+        );
+      await punch(c, me, D(3), "09:20", "in");
+      await punch(c, me, D(3), "17:40", "out"); // Mon 3 Mar: present, paid
+      await leaveRow(lopId, D(11), D(13), 3, 3); // Tue to Thu: leave without pay, 3 days
+      await leaveRow(elId, D(17), D(21), 5, 2.5); // Mon to Fri: 5 days, the last 2.5 unpaid
+      await leaveRow(lopId, D(25), D(25), 0.5, 0.5, "second_half"); // Tue 25 Mar: half a day without pay
+
+      const unpaid = async () =>
+        Object.fromEntries((await c.query("select work_date::text as d, status, unpaid_days::float8 as u from attendance_day where employee_id = $1", [me.employeeId])).rows.map((r) => [r.d, r]));
+      const preview = await attendance.previewMonthLock(hr, Y, M, tx);
+      await attendance.lockMonthTx(tx, hr, { year: Y, month: M });
+      const days = await unpaid();
+
+      expect(days[D(3)]).toMatchObject({ status: "present", u: 0 });
+      for (const d of [11, 12, 13]) expect(days[D(d)]).toMatchObject({ status: "leave", u: 1 });
+      expect(days[D(17)]).toMatchObject({ status: "leave", u: 0 }); // paid days come first
+      expect(days[D(18)]).toMatchObject({ status: "leave", u: 0 });
+      expect(days[D(19)]).toMatchObject({ status: "leave", u: 0.5 });
+      expect(days[D(20)]).toMatchObject({ status: "leave", u: 1 });
+      expect(days[D(21)]).toMatchObject({ status: "leave", u: 1 });
+      expect(days[D(25)]).toMatchObject({ status: "half_day", u: 0.5 });
+      expect(days[D(8)]).toMatchObject({ status: "weekly_off", u: 0 }); // Saturday
+      expect(days[D(4)]).toMatchObject({ status: "absent", u: 1 }); // a working day, nothing recorded
+
+      // The preview said the same as what was stored, for this person.
+      const stored = Object.values(days).reduce((sum: number, r: any) => sum + r.u, 0);
+      expect(preview.unpaidPeople.find((p) => p.code === "TESTDB-E")?.days).toBeCloseTo(stored, 5);
+      // 3 (LOP) + 2.5 (shortfall) + 0.5 (half day) + the plain absent working days
+      const absent = Object.values(days).filter((r: any) => r.status === "absent").length;
+      expect(stored).toBeCloseTo(3 + 2.5 + 0.5 + absent, 5);
     });
   });
 
@@ -229,5 +274,129 @@ describe.skipIf(!enabled)("Month lock against the database", () => {
       await expect(attendance.requestRegularizationsTx(tx, me, { reason: "forgot", items: [{ date, in: "09:30", out: "17:30" }] })).rejects.toThrow(/is locked/);
       expect(addDays(date, 1) > date).toBe(true);
     });
+  });
+});
+
+describe.skipIf(!enabled)("Month lock waits for, and holds back, other changes (R65)", () => {
+  let pool: Pool;
+  let attendance: typeof import("@/modules/attendance/data");
+  let periods: typeof import("@/shared/periods");
+  let pnj: string;
+
+  beforeAll(async () => {
+    pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    attendance = await import("@/modules/attendance/data");
+    periods = await import("@/shared/periods");
+    pnj = (await pool.query("select id from location where code = 'PNJ'")).rows[0].id;
+  });
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  const q = (c: PoolClient) => ({
+    query: async (text: string, params: unknown[] = []) => (await c.query(text, params)).rows,
+  });
+  /** Waits until some session is queued behind a month lock, as seen by a third connection (not just a slow query). */
+  async function waitUntilBlocked(timeoutMs = 8000): Promise<void> {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const n = (await pool.query("select count(*)::int as n from pg_locks where locktype = 'advisory' and classid = 7101 and not granted")).rows[0].n;
+      if (n > 0) return;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error("nothing is waiting on a month lock");
+  }
+
+  async function newPerson(c: PoolClient, code: string, roles: Role[] = []): Promise<TestActor> {
+    const r = await c.query(
+      "insert into employee (employee_code, full_name, work_email, joining_date) values ($1, $2, $3, '2024-01-01') returning id",
+      [code, `DB ${code}`, `${code.toLowerCase()}-${Math.random().toString(36).slice(2)}@example.invalid`],
+    );
+    const id = r.rows[0].id as string;
+    await c.query(
+      "insert into employment_assignment (employee_id, location_id, department, designation, employment_type, effective_from) values ($1, $2, 'T', 'T', 'permanent', '2024-01-01')",
+      [id, pnj],
+    );
+    for (const role of roles) await c.query("insert into employee_role (employee_id, role) values ($1, $2)", [id, role]);
+    return { employeeId: id, employeeCode: code, fullName: `DB ${code}`, roles: ["employee", ...roles] };
+  }
+
+  it("a punch for a month waits while HR is locking that month, then goes through if the lock is abandoned", async () => {
+    const a = await pool.connect(); // the lock
+    const b = await pool.connect(); // the punch
+    try {
+      await a.query("begin");
+      await b.query("begin");
+      const hr = await newPerson(a, "TESTDB-HR", ["hr_admin"]);
+      const worker = await newPerson(b, "TESTDB-E");
+
+      await attendance.lockMonthTx(q(a), hr, { year: Y, month: M }); // holds the month, not committed
+
+      let finished = false;
+      const punching = attendance
+        .punchTx(q(b), worker, { at: new Date(`${D(5)}T09:30:00+05:30`) })
+        .then((r) => {
+          finished = true;
+          return r;
+        });
+      await waitUntilBlocked(); // the punch is queued behind the lock, seen from outside
+      expect(finished).toBe(false);
+
+      await a.query("rollback"); // the lock is abandoned
+      const result = await punching;
+      expect(result).toEqual({ direction: "in", time: "09:30" });
+    } finally {
+      await a.query("rollback").catch(() => {});
+      await b.query("rollback").catch(() => {});
+      a.release();
+      b.release();
+    }
+  });
+
+  it("the lock waits for a change that is already in progress, then goes ahead", async () => {
+    const a = await pool.connect(); // the lock
+    const b = await pool.connect(); // a change in progress
+    try {
+      await a.query("begin");
+      await b.query("begin");
+      const hr = await newPerson(a, "TESTDB-HR", ["hr_admin"]);
+
+      await periods.lockMonthsShared(q(b), [D(5)]); // a writer is part-way through a change to March
+
+      let finished = false;
+      const locking = attendance.lockMonthTx(q(a), hr, { year: Y, month: M }).then((r) => {
+        finished = true;
+        return r;
+      });
+      await waitUntilBlocked(); // the lock is queued behind the writer, seen from outside
+      expect(finished).toBe(false);
+
+      await b.query("rollback"); // the writer finishes
+      const result = await locking;
+      expect(result.year).toBe(Y);
+    } finally {
+      await a.query("rollback").catch(() => {});
+      await b.query("rollback").catch(() => {});
+      a.release();
+      b.release();
+    }
+  });
+
+  it("locks for different months do not block each other", async () => {
+    const a = await pool.connect();
+    const b = await pool.connect();
+    try {
+      await a.query("begin");
+      await b.query("begin");
+      await periods.lockMonthExclusive(q(a), 2025, 3);
+      const started = Date.now();
+      await periods.lockMonthsShared(q(b), ["2025-04-10"]);
+      expect(Date.now() - started).toBeLessThan(700);
+    } finally {
+      await a.query("rollback").catch(() => {});
+      await b.query("rollback").catch(() => {});
+      a.release();
+      b.release();
+    }
   });
 });

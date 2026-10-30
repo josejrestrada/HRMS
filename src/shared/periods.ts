@@ -23,3 +23,37 @@ export async function firstLockedMonth(q: Queryable, dates: string[]): Promise<s
   const locked = await lockedMonthKeys(sorted[0], sorted[sorted.length - 1], q);
   return dates.map(monthKey).sort().find((k) => locked.has(k)) ?? null;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Serialising the month lock with everything that changes a month (R65)
+// ---------------------------------------------------------------------------------------------
+
+const LOCK_NAMESPACE = 7101;
+const monthNumber = (isoDate: string) => Number(isoDate.slice(0, 4)) * 12 + (Number(isoDate.slice(5, 7)) - 1);
+
+/** Every "YYYY-MM" month from the month of `from` to the month of `to`, inclusive. */
+export function monthsBetween(from: string, to: string): string[] {
+  const out: string[] = [];
+  for (let n = monthNumber(from); n <= monthNumber(to) && out.length < 24; n++) {
+    out.push(`${Math.floor(n / 12)}-${String((n % 12) + 1).padStart(2, "0")}`);
+  }
+  return out;
+}
+
+/**
+ * Anything that changes a month's attendance or leave calls this first. It takes a shared,
+ * transaction-long lock for each month touched, so it waits while HR is locking that month and an
+ * in-progress lock waits for it. Months are taken in order, which keeps writers from deadlocking.
+ */
+export async function lockMonthsShared(q: Queryable, dates: string[]): Promise<void> {
+  if (dates.length === 0) return;
+  const sorted = [...dates].sort();
+  for (const key of monthsBetween(sorted[0], sorted[sorted.length - 1])) {
+    await q.query("select pg_advisory_xact_lock_shared($1::int, $2::int)", [LOCK_NAMESPACE, monthNumber(`${key}-01`)]);
+  }
+}
+
+/** The month lock itself: exclusive for one month, held until the transaction ends. */
+export async function lockMonthExclusive(q: Queryable, year: number, month: number): Promise<void> {
+  await q.query("select pg_advisory_xact_lock($1::int, $2::int)", [LOCK_NAMESPACE, year * 12 + (month - 1)]);
+}

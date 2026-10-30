@@ -40,6 +40,8 @@ export type DayInput = {
   regularization?: Regularization | null;
   /** False for a day before the employee joined or after they left (R61). Defaults to true. */
   employed?: boolean;
+  /** How much of this day's approved leave is unpaid, 0 to 1 (R64). Only used on a leave day. */
+  unpaidLeave?: number;
 };
 
 export type DayResult = {
@@ -60,6 +62,8 @@ export type DayResult = {
   employed: boolean;
   /** The day comes from the frozen copy of a locked month (R58). */
   locked: boolean;
+  /** Unpaid part of the day, 0 to 1 (R64). Absent days are set to 1 when the month is frozen. */
+  unpaid: number;
   note: string | null;
 };
 
@@ -121,6 +125,7 @@ export function deriveDay(i: DayInput): DayResult {
     fixPending: i.regularization?.status === "pending",
     employed: true,
     locked: false,
+    unpaid: 0,
     note: null,
     ...extra,
   });
@@ -132,8 +137,8 @@ export function deriveDay(i: DayInput): DayResult {
   if (i.weeklyOff) return result("weekly_off");
 
   // Leave beats punches (R43, P9). Half-day leave shows as a half day.
-  if (i.leave === "full") return result("leave");
-  if (i.leave) return result("half_day", { note: "Half-day leave" });
+  if (i.leave === "full") return result("leave", { unpaid: i.unpaidLeave ?? 0 });
+  if (i.leave) return result("half_day", { note: "Half-day leave", unpaid: i.unpaidLeave ?? 0 });
   if (i.wfh) return result("wfh", { note: "Work from home" });
 
   if (i.date > i.today) return result("upcoming");
@@ -253,26 +258,64 @@ export type FrozenDay = {
   firstIn: string | null;
   lastOut: string | null;
   workedMinutes: number | null;
+  /** Unpaid part of the day, 0 to 1, for payroll (R64). */
+  unpaid: number;
 };
 
 /**
- * What is stored when a month is locked (R59). A day that still needs action becomes absent, which
- * is unpaid. Days outside employment, and days that cannot be judged, are not stored (null).
+ * What is stored when a month is locked (R59, R64). A day that still needs action becomes absent.
+ * Every absent day is unpaid (R27); leave contributes the unpaid part of its request. Days outside
+ * employment, and days that cannot be judged, are not stored (null).
  */
 export function freezeDay(d: DayResult): FrozenDay | null {
   if (!d.employed || d.status === "upcoming") return null;
   const base = { late: d.late, firstIn: d.firstIn, lastOut: d.lastOut, workedMinutes: d.workedMinutes };
   if (d.status === "missed_punch") {
-    return { ...base, status: "absent", note: "Missing check-out, not fixed in time (unpaid)" };
+    return { ...base, status: "absent", unpaid: 1, note: "Missing check-out, not fixed in time (unpaid)" };
   }
-  if (d.status === "absent" && d.needsAction) {
-    return { ...base, status: "absent", note: `${d.note ?? "Absent"}, not fixed in time (unpaid)` };
+  if (d.status === "absent") {
+    const unfixed = d.needsAction;
+    return { ...base, status: "absent", unpaid: 1, note: unfixed ? `${d.note ?? "Absent"}, not fixed in time (unpaid)` : `${d.note ?? "Absent"} (unpaid)` };
   }
-  return { ...base, status: d.status, note: d.note };
+  if (d.status === "leave" || (d.status === "half_day" && d.note === "Half-day leave")) {
+    const unpaid = Math.min(Math.max(d.unpaid, 0), d.status === "half_day" ? 0.5 : 1);
+    return { ...base, status: d.status, unpaid, note: unpaid > 0 ? `${d.note ? `${d.note}, ` : ""}${unpaid === 1 ? "leave without pay" : "partly unpaid leave"}` : d.note };
+  }
+  return { ...base, status: d.status, unpaid: 0, note: d.note };
 }
 
-/** True for a frozen day that was left unfixed and so counts as unpaid. */
-export const isUnpaidFrozen = (f: FrozenDay) => f.status === "absent" && !!f.note?.includes("not fixed in time");
+/** True for a frozen day with any unpaid part. */
+export const isUnpaidFrozen = (f: FrozenDay) => f.unpaid > 0;
+
+/**
+ * Which days of an approved leave request are unpaid (R34, R64). Leave without pay is unpaid on
+ * every working day. For other leave with a converted shortfall (`lopDays`), the unpaid part is taken
+ * from the LAST working days of the request: paid days first. A half-day request weighs 0.5.
+ */
+export function allocateUnpaid(
+  req: { start: string; end: string; part: LeavePart; typeCode: string; lopDays: number },
+  isWorkingDay: (date: string) => boolean,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  const weight = req.part === "full" ? 1 : 0.5;
+  const days: string[] = [];
+  let d = req.start;
+  for (let i = 0; i < 400 && d <= req.end; i++) {
+    if (isWorkingDay(d)) days.push(d);
+    d = new Date(new Date(`${d}T00:00:00Z`).getTime() + 86_400_000).toISOString().slice(0, 10);
+  }
+  if (req.typeCode === "LOP") {
+    for (const date of days) out.set(date, weight);
+    return out;
+  }
+  let remaining = req.lopDays;
+  for (let i = days.length - 1; i >= 0 && remaining > 0; i--) {
+    const take = Math.min(weight, remaining);
+    out.set(days[i], take);
+    remaining -= take;
+  }
+  return out;
+}
 
 export type LockCheck = { ok: true } | { ok: false; error: string };
 

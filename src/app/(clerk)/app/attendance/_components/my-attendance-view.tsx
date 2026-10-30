@@ -144,7 +144,7 @@ export function MyAttendanceView(props: {
                 ) : null}
                 {d.late ? <span className="cal-late">Late</span> : null}
                 {d.fixPending ? <span className="cal-late">Fix sent</span> : null}
-                {d.locked && d.note?.includes("not fixed in time") ? <span className="cal-late">Unpaid</span> : null}
+                {d.locked && d.unpaid > 0 ? <span className="cal-late">{d.unpaid >= 1 ? "Unpaid" : "Half unpaid"}</span> : null}
                 {d.regularized ? <span className="cal-times">Fixed</span> : null}
               </div>
             );

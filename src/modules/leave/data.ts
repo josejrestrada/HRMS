@@ -4,7 +4,7 @@ import { recordAudit } from "@/shared/audit";
 import { DomainError } from "@/shared/errors";
 import { ForbiddenError, requireRole, type Actor } from "@/shared/roles";
 import { canDecide } from "@/shared/approvals";
-import { firstLockedMonth } from "@/shared/periods";
+import { firstLockedMonth, lockMonthsShared } from "@/shared/periods";
 import { addDays, addMonths, formatDate, todayIST } from "@/shared/dates";
 import { getSelfFacts } from "@/modules/employees/data";
 import type { ApplyLeaveInput, CompoffInput, DecisionInput, MaternityInput, PaternityInput } from "./schemas";
@@ -38,6 +38,7 @@ const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "Ju
 
 /** R62: leave cannot be applied for, or approved, for a month HR has locked. */
 async function assertNotInLockedMonth(tx: Queryable, start: string, end: string, field?: string) {
+  await lockMonthsShared(tx, [start, end]); // wait for an in-progress month lock (R65)
   const locked = await firstLockedMonth(tx, [start, end]);
   if (locked) {
     const [y, m] = locked.split("-").map(Number);
@@ -538,6 +539,7 @@ export async function cancelLeaveTx(tx: Queryable, actor: Actor | null, requestI
 
   const mine = req.employee_id === actor.employeeId;
   if (!mine && !isHr(actor)) throw new ForbiddenError("You cannot cancel this request.");
+  await lockMonthsShared(tx, [req.start_date, req.end_date]); // R65
   if (req.status === "approved" && !isHr(actor) && (await firstLockedMonth(tx, [req.start_date, req.end_date]))) {
     throw new DomainError("This leave overlaps a closed month, so only HR can cancel it.");
   }
@@ -944,7 +946,7 @@ export async function runYearEnd(actor: Actor | null, opts: { year: number }) {
 // ---------------------------------------------------------------------------------------------
 
 export type CalendarFacts = {
-  leave: { employeeId: string; start: string; end: string; part: DayPart }[];
+  leave: { employeeId: string; start: string; end: string; part: DayPart; typeCode: string; lopDays: number }[];
   holidays: { locationId: string; date: string; name: string }[];
 };
 
@@ -959,11 +961,11 @@ export async function getCalendarFacts(
   else if (!isHr(actor) && opts.employeeIds.some((id) => id !== actor.employeeId)) throw new ForbiddenError();
 
   const [leave, holidays] = await Promise.all([
-    q.query<{ employee_id: string; start_date: string; end_date: string; day_part: DayPart }>(
-      `select employee_id, start_date::text, end_date::text, day_part
-         from leave_request
-        where status = 'approved' and ($1::uuid[] is null or employee_id = any($1::uuid[]))
-          and start_date <= $3::date and end_date >= $2::date`,
+    q.query<{ employee_id: string; start_date: string; end_date: string; day_part: DayPart; code: string; lop_days: number }>(
+      `select lr.employee_id, lr.start_date::text, lr.end_date::text, lr.day_part, t.code, lr.lop_days::float8 as lop_days
+         from leave_request lr join leave_type t on t.id = lr.leave_type_id
+        where lr.status = 'approved' and ($1::uuid[] is null or lr.employee_id = any($1::uuid[]))
+          and lr.start_date <= $3::date and lr.end_date >= $2::date`,
       [opts.employeeIds, opts.from, opts.to],
     ),
     opts.locationIds.length === 0
@@ -975,7 +977,7 @@ export async function getCalendarFacts(
         ),
   ]);
   return {
-    leave: leave.map((r) => ({ employeeId: r.employee_id, start: r.start_date, end: r.end_date, part: r.day_part })),
+    leave: leave.map((r) => ({ employeeId: r.employee_id, start: r.start_date, end: r.end_date, part: r.day_part, typeCode: r.code, lopDays: r.lop_days })),
     holidays: holidays.map((r) => ({ locationId: r.location_id, date: r.d, name: r.name })),
   };
 }

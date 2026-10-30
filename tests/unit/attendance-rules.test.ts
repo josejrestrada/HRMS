@@ -6,6 +6,7 @@ import {
   defaultFixTimes,
   deriveDay,
   freezeDay,
+  allocateUnpaid,
   isUnpaidFrozen,
   spanAt,
   formatMinutes,
@@ -259,35 +260,67 @@ describe("days outside employment (R61)", () => {
   });
 });
 
-describe("freezeDay (R59)", () => {
-  it("keeps a good day as it is", () => {
-    expect(freezeDay(deriveDay(day({ punches: inOut("09:20", "17:45") })))).toMatchObject({ status: "present", firstIn: "09:20", lastOut: "17:45", late: false });
-    expect(freezeDay(deriveDay(day({ weeklyOff: true })))).toMatchObject({ status: "weekly_off" });
-    expect(freezeDay(deriveDay(day({ leave: "full" })))).toMatchObject({ status: "leave" });
+describe("freezeDay (R59, R64)", () => {
+  it("keeps a good day as it is, with nothing unpaid", () => {
+    expect(freezeDay(deriveDay(day({ punches: inOut("09:20", "17:45") })))).toMatchObject({ status: "present", firstIn: "09:20", lastOut: "17:45", late: false, unpaid: 0 });
+    expect(freezeDay(deriveDay(day({ weeklyOff: true })))).toMatchObject({ status: "weekly_off", unpaid: 0 });
+    expect(freezeDay(deriveDay(day({ holiday: "Christmas" })))).toMatchObject({ status: "holiday", unpaid: 0 });
+    expect(freezeDay(deriveDay(day({ leave: "full" })))).toMatchObject({ status: "leave", unpaid: 0 });
   });
 
   it("turns a missed check-out into an unpaid absent day", () => {
     const f = freezeDay(deriveDay(day({ punches: [{ time: "09:30", direction: "in" }] })))!;
-    expect(f.status).toBe("absent");
+    expect(f).toMatchObject({ status: "absent", unpaid: 1 });
     expect(f.note).toContain("not fixed in time");
     expect(isUnpaidFrozen(f)).toBe(true);
     expect(f.firstIn).toBe("09:30");
   });
 
-  it("turns a day with no punches, and a very short day, into unpaid absent days", () => {
-    expect(isUnpaidFrozen(freezeDay(deriveDay(day()))!)).toBe(true);
-    expect(isUnpaidFrozen(freezeDay(deriveDay(day({ punches: inOut("09:30", "12:00") })))!)).toBe(true);
+  it("makes a day with no punches, and a very short day, one unpaid day each", () => {
+    expect(freezeDay(deriveDay(day()))).toMatchObject({ status: "absent", unpaid: 1 });
+    expect(freezeDay(deriveDay(day({ punches: inOut("09:30", "12:00") })))).toMatchObject({ status: "absent", unpaid: 1 });
   });
 
-  it("does not mark a fixed day as unpaid, even if the approved hours are short", () => {
-    const fixed = freezeDay(deriveDay(day({ regularization: { in: "09:30", out: "12:00", status: "approved" } })))!;
-    expect(fixed.status).toBe("absent");
-    expect(isUnpaidFrozen(fixed)).toBe(false);
+  it("still counts an approved fix with very short hours as absent, but not as 'not fixed in time'", () => {
+    const f = freezeDay(deriveDay(day({ regularization: { in: "09:30", out: "12:00", status: "approved" } })))!;
+    expect(f).toMatchObject({ status: "absent", unpaid: 1 });
+    expect(f.note).not.toContain("not fixed in time");
   });
 
-  it("keeps half days and late marks", () => {
-    const f = freezeDay(deriveDay(day({ punches: inOut("10:10", "15:00") })))!;
-    expect(f).toMatchObject({ status: "half_day", late: true });
+  it("does not make a half day of attendance unpaid (an open question for the owner)", () => {
+    expect(freezeDay(deriveDay(day({ punches: inOut("10:10", "15:00") })))).toMatchObject({ status: "half_day", late: true, unpaid: 0 });
+  });
+
+  it("carries the unpaid part of leave: whole, half, partly and none", () => {
+    expect(freezeDay(deriveDay(day({ leave: "full", unpaidLeave: 1 })))).toMatchObject({ status: "leave", unpaid: 1 });
+    expect(freezeDay(deriveDay(day({ leave: "full", unpaidLeave: 0.5 })))).toMatchObject({ status: "leave", unpaid: 0.5 });
+    expect(freezeDay(deriveDay(day({ leave: "first_half", unpaidLeave: 0.5 })))).toMatchObject({ status: "half_day", unpaid: 0.5 });
+    expect(freezeDay(deriveDay(day({ leave: "first_half" })))).toMatchObject({ status: "half_day", unpaid: 0 });
+    expect(freezeDay(deriveDay(day({ leave: "full", unpaidLeave: 5 })))!.unpaid).toBe(1); // never more than a whole day
+  });
+});
+
+describe("allocateUnpaid (R34, R64)", () => {
+  const weekdays = (d: string) => ![0, 6].includes(new Date(`${d}T00:00:00Z`).getUTCDay());
+
+  it("makes every working day of leave without pay unpaid, and skips weekly offs", () => {
+    // Thu 6 to Tue 11 Nov 2025: Thu, Fri, Mon, Tue are working days
+    const m = allocateUnpaid({ start: "2025-11-06", end: "2025-11-11", part: "full", typeCode: "LOP", lopDays: 4 }, weekdays);
+    expect([...m.entries()]).toEqual([["2025-11-06", 1], ["2025-11-07", 1], ["2025-11-10", 1], ["2025-11-11", 1]]);
+  });
+
+  it("takes a converted shortfall from the last days of the request, paid days first", () => {
+    const m = allocateUnpaid({ start: "2025-11-03", end: "2025-11-07", part: "full", typeCode: "EL", lopDays: 2.5 }, weekdays);
+    expect([...m.entries()].sort()).toEqual([["2025-11-05", 0.5], ["2025-11-06", 1], ["2025-11-07", 1]]);
+  });
+
+  it("marks nothing unpaid for ordinary paid leave", () => {
+    expect(allocateUnpaid({ start: "2025-11-03", end: "2025-11-07", part: "full", typeCode: "CL", lopDays: 0 }, weekdays).size).toBe(0);
+  });
+
+  it("handles a half-day request", () => {
+    expect([...allocateUnpaid({ start: "2025-11-03", end: "2025-11-03", part: "first_half", typeCode: "LOP", lopDays: 0.5 }, weekdays).entries()]).toEqual([["2025-11-03", 0.5]]);
+    expect([...allocateUnpaid({ start: "2025-11-03", end: "2025-11-03", part: "second_half", typeCode: "CL", lopDays: 0.5 }, weekdays).entries()]).toEqual([["2025-11-03", 0.5]]);
   });
 });
 

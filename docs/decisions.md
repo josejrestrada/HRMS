@@ -31,6 +31,20 @@ Status values: **Proposed** (drafted from the 2026-10-23 design review, awaiting
 
 ## Accepted
 
+## 2026-10-31 - Review fixes: month lock races and unpaid leave in the frozen copy
+- **Status:** Accepted (2026-10-31, owner: "fix findings 2 and 3" of the review).
+- **Finding 2, the lock could miss a write that was happening at the same moment.** Under normal database isolation a punch, a fix, an approval or a leave decision that committed while the lock was running could be missed by the frozen copy, or a fix could be left pending forever. **Fix:** locking a month now takes an **exclusive** per-month lock in the database for the length of the transaction, and everything that can change a month takes the **shared** form of the same lock first: punches, sending, approving and cancelling fixes, and applying for, approving or cancelling leave (including maternity and paternity). Writers wait while a lock is in progress; a lock waits for writers already running to finish, and so sees their data. After the lock commits, the existing database triggers refuse everything. Locks for different months do not block each other.
+- **Finding 3, unpaid leave was frozen as plain "leave".** The frozen day now carries an `unpaid_days` amount (0 to 1) so payroll can list every unpaid day from the copy alone (migration 009). Unpaid is:
+  - **absent** (no check-in, a missed check-out not fixed in time, or under 4.5 hours): 1 day;
+  - **leave without pay** (the LOP leave type): 1 day for each leave day, or half a day for a half-day request;
+  - **a shortfall converted to LOP** (R34): the unpaid part of the request, **taken from its last days** (paid days first, the unpaid days at the end), with a half day where the amount is a half.
+  Everything else is 0, including approved paid leave, work from home, holidays and weekly offs.
+- **Assumptions the owner must confirm:** (1) for a request that is partly unpaid, the unpaid days are the **last** days of the request; (2) a **half day of attendance** (4.5 to 8 hours worked) counts as 0 unpaid for now, because R27 does not say it costs half a day's pay; (3) half-day leave still counts as a complete day (review finding 4 is still open).
+- **Limit:** for a partly-unpaid request that runs past the edge of the month being looked at, working days outside that month are taken as Monday to Friday with no holidays when choosing which days are unpaid. This only matters for a shortfall request that straddles two months.
+- **Lock preview and result** now report the total unpaid days, which can include halves, and list people by their unpaid days.
+- **Clarifications added to RESEARCH.md as R64 and R65.**
+- **Not changed:** the other review findings (half-day leave, comp-off concurrency, repeated maternity requests, future-dated managers, privileges, date validation, test database guard).
+
 ## 2026-10-31 - Review fix: attendance calendar is resolved day by day
 - **Status:** Accepted (2026-10-31, owner: "fix only finding 1" of the review).
 - **The bug:** attendance looked up each person's location, weekly offs and policy once, for the **first day** of the period. Someone who joined on the 10th had no assignment on the 1st, so they got default weekly offs, no holidays and the default policy for the whole month; a holiday then showed as "absent, no check-in" and the month lock stored it as unpaid. A mid-month transfer used the old location for the whole month. My attendance, Team today and the month lock were all affected.

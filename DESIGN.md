@@ -116,7 +116,7 @@ Calendar grid. Each day shows a status icon and short label (Present, Half day, 
 - **Approvals** (`/app/attendance/approvals`, managers and HR): pending fixes grouped by person and batch, with **Approve all**, **Reject all** (reason required) and the same buttons per day.
 
 ### 4.6c Month lock (HR)
-`/app/attendance/lock`: the year as a list of months, each **Open**, **Locked** (with who and when) or **Not finished**. Opening a finished month shows the preview (people, days that will become unpaid, fixes still waiting) and a **Lock month** button that is disabled while fixes are waiting. A locked month shows a "Locked" banner on My attendance and offers no fixes.
+`/app/attendance/lock`: the year as a list of months, each **Open**, **Locked** (with who and when) or **Not finished**. Opening a finished month shows the preview (people, days that will become unpaid including unpaid leave, fixes still waiting) and a **Lock month** button that is disabled while fixes are waiting. A locked month shows a "Locked" banner on My attendance and offers no fixes.
 
 ### 4.7 Regularization
 - A list of days needing action, each with a checkbox, the problem ("Missing out-punch"), and proposed times.

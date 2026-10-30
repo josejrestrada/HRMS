@@ -172,6 +172,10 @@ These are my own design choices, informed by the research above. The statutory n
 ### Correction found in review (see docs/decisions.md)
 - **R63.** Weekly offs, holidays and the attendance policy are decided for each day by the location on the person's assignment effective that day, not once for the whole month. A person who joined or transferred mid-month therefore gets the right calendar on every day.
 
+### Corrections found in review: month lock (see docs/decisions.md)
+- **R64.** A locked month stores for each day how much of it is unpaid (0 to 1): an absent day is 1, leave without pay is 1 per day, and the converted shortfall of a leave request (R34) is taken from the last days of that request. Payroll reads these amounts. Whether a half day of attendance (R27) costs half a day's pay is still to be decided.
+- **R65.** Locking a month and changing anything in that month (a punch, a fix, a leave decision) cannot happen at the same moment: the lock waits for changes already in progress, and changes wait while a lock is in progress.
+
 ### Still to resolve
 - Which Goa Act applies now (1973 or 2025) and its commencement date, and whether the plant in Verna is also covered by the Factories Act.
 - The official Goa 2026 holiday notification, to replace the tentative list in section 6.

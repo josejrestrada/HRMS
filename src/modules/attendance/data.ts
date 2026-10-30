@@ -4,12 +4,13 @@ import { DomainError } from "@/shared/errors";
 import { recordAudit } from "@/shared/audit";
 import { ForbiddenError, requireRole, type Actor } from "@/shared/roles";
 import { canDecide } from "@/shared/approvals";
-import { firstLockedMonth, lockedMonthKeys } from "@/shared/periods";
+import { firstLockedMonth, lockMonthExclusive, lockMonthsShared, lockedMonthKeys } from "@/shared/periods";
 import { addDays, formatDate, todayIST } from "@/shared/dates";
 import { getAssignmentSpans, getDirectReportIds, getWorkforce, isCurrentManagerOf, type AssignmentSpan, type WorkforceRow } from "@/modules/employees/data";
 import { getCalendarFacts } from "@/modules/leave/data";
 import {
   MONTH_NAMES,
+  allocateUnpaid,
   canLockMonth,
   canRegularize,
   checkFixTimes,
@@ -48,6 +49,7 @@ type FrozenRow = {
   note: string | null;
   first_in: string | null;
   last_out: string | null;
+  unpaid_days: number;
 };
 
 export type DayRow = {
@@ -205,7 +207,7 @@ async function deriveRange(
     ids.length === 0 || opts.ignoreFrozen
       ? Promise.resolve([] as FrozenRow[])
       : q.query<FrozenRow>(
-          `select employee_id, work_date::text as d, status, worked_minutes, late, note,
+          `select employee_id, work_date::text as d, status, worked_minutes, late, note, unpaid_days::float8 as unpaid_days,
                   to_char(first_in at time zone 'Asia/Kolkata', 'HH24:MI') as first_in,
                   to_char(last_out at time zone 'Asia/Kolkata', 'HH24:MI') as last_out
              from attendance_day
@@ -247,6 +249,23 @@ async function deriveRange(
     return (span && policies.get(span.locationId)) || DEFAULT_POLICY;
   };
 
+  // How much of each approved leave day is unpaid (R64). Working days outside the period use Monday to
+  // Friday with no holidays, because assignments and holidays were only loaded for the period.
+  const unpaidLeave = new Map<string, number>();
+  for (const l of facts.leave) {
+    if (l.typeCode !== "LOP" && l.lopDays <= 0) continue;
+    const empSpans = spansBy.get(l.employeeId) ?? [];
+    const working = (date: string) => {
+      const span = spanAt(empSpans, date);
+      const off = (span?.weeklyOffDays ?? [0, 6]).includes(new Date(`${date}T00:00:00Z`).getUTCDay());
+      const holiday = span ? holidayBy.has(`${span.locationId}|${date}`) : false;
+      return !off && !holiday;
+    };
+    for (const [date, amount] of allocateUnpaid(l, working)) {
+      unpaidLeave.set(`${l.employeeId}|${date}`, (unpaidLeave.get(`${l.employeeId}|${date}`) ?? 0) + amount);
+    }
+  }
+
   const dates = datesBetween(from, to);
   const days = new Map<string, DayResult[]>();
   for (const w of workforce) {
@@ -269,6 +288,7 @@ async function deriveRange(
             fixPending: false,
             employed: true,
             locked: true,
+            unpaid: frozen.unpaid_days,
             note: frozen.note,
           } satisfies DayResult;
         }
@@ -282,6 +302,7 @@ async function deriveRange(
           weeklyOff: weeklyOffDays.includes(new Date(`${date}T00:00:00Z`).getUTCDay()),
           holiday: span ? (holidayBy.get(`${span.locationId}|${date}`) ?? null) : null,
           leave: leave ? leave.part : null,
+          unpaidLeave: unpaidLeave.get(`${w.id}|${date}`) ?? 0,
           wfh: false, // work from home requests arrive in the next slice
           punches: punchesBy.get(`${w.id}|${date}`) ?? [],
           policy: (span && policies.get(span.locationId)) || DEFAULT_POLICY,
@@ -353,6 +374,7 @@ export async function punchTx(tx: Queryable, actor: Actor | null, opts: { at?: D
   if (!emp || emp.status !== "active") throw new DomainError("Only active employees can check in.");
 
   const at = opts.at ?? new Date();
+  await lockMonthsShared(tx, [todayIST(at)]); // R65: wait for an in-progress month lock
   const todayRows = await tx.query<{ hm: string; direction: "in" | "out"; seconds_ago: number }>(
     `select to_char(punched_at at time zone 'Asia/Kolkata', 'HH24:MI') as hm, direction,
             extract(epoch from ($2::timestamptz - punched_at))::float8 as seconds_ago
@@ -467,6 +489,7 @@ export async function requestRegularizationsTx(tx: Queryable, actor: Actor | nul
   const dates = input.items.map((i) => i.date);
   if (new Set(dates).size !== dates.length) throw new DomainError("The same day was chosen twice.");
 
+  await lockMonthsShared(tx, dates); // R65
   const lockedMonth = await firstLockedMonth(tx, dates);
   if (lockedMonth) {
     const [y, m] = lockedMonth.split("-").map(Number);
@@ -527,6 +550,7 @@ export async function cancelRegularizationTx(tx: Queryable, actor: Actor | null,
   if (!req) throw new DomainError("That request was not found.");
   if (req.employee_id !== actor.employeeId) throw new ForbiddenError("You cannot cancel this request.");
   if (req.status !== "pending") throw new DomainError("Only a request that is still waiting can be cancelled.");
+  await lockMonthsShared(tx, [req.d]); // R65
   await tx.query("update regularization set status = 'cancelled' where id = $1", [requestId]);
   await recordAudit({ actorEmployeeId: actor.employeeId, action: "regularization_cancelled", entity: "regularization", entityId: requestId, summary: req.d }, tx);
 }
@@ -556,6 +580,7 @@ export async function decideRegularizationsTx(
     )[0];
     if (!req) throw new DomainError("That request was not found.");
     if (req.status !== "pending") throw new DomainError("A request has already been decided or cancelled.");
+    await lockMonthsShared(tx, [req.d]); // R65
     if (await firstLockedMonth(tx, [req.d])) throw new DomainError("That month is locked, so this request can no longer be decided.");
     const allowed = canDecide({
       actorEmployeeId: actor.employeeId,
@@ -705,9 +730,9 @@ async function planLock(actor: Actor, year: number, month: number, q: Queryable)
       if (!frozen) continue;
       rows.push({ employee: w, date: d.date, frozen });
       if (isUnpaidFrozen(frozen)) {
-        unpaidDays += 1;
+        unpaidDays += frozen.unpaid;
         const u = unpaid.get(w.id) ?? { code: w.code, name: w.fullName, days: 0 };
-        u.days += 1;
+        u.days += frozen.unpaid;
         unpaid.set(w.id, u);
       }
     }
@@ -764,6 +789,9 @@ export async function lockMonthTx(tx: Queryable, actor: Actor | null, input: { y
   const timing = canLockMonth({ today: todayIST(), year, month });
   if (!timing.ok) throw new DomainError(timing.error);
 
+  // R65: wait for every change to this month that is already in progress, and stop new ones, until we commit.
+  await lockMonthExclusive(tx, year, month);
+
   const from = `${year}-${String(month).padStart(2, "0")}-01`;
   const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDayOf(year, month)).padStart(2, "0")}`;
   if ((await lockedMonthKeys(from, to, tx)).has(`${year}-${String(month).padStart(2, "0")}`)) {
@@ -781,13 +809,14 @@ export async function lockMonthTx(tx: Queryable, actor: Actor | null, input: { y
   const stamp = (date: string, hm: string | null) => (hm ? `${date}T${hm}:00+05:30` : null);
   if (plan.rows.length > 0) {
     await tx.query(
-      `insert into attendance_day (employee_id, work_date, status, first_in, last_out, worked_minutes, late, locked, note)
-       select employee_id, work_date, status, first_in, last_out, worked_minutes, late, true, note
-         from unnest($1::uuid[], $2::date[], $3::text[], $4::timestamptz[], $5::timestamptz[], $6::int[], $7::boolean[], $8::text[])
-              as t(employee_id, work_date, status, first_in, last_out, worked_minutes, late, note)
+      `insert into attendance_day (employee_id, work_date, status, first_in, last_out, worked_minutes, late, locked, note, unpaid_days)
+       select employee_id, work_date, status, first_in, last_out, worked_minutes, late, true, note, unpaid_days
+         from unnest($1::uuid[], $2::date[], $3::text[], $4::timestamptz[], $5::timestamptz[], $6::int[], $7::boolean[], $8::text[], $9::numeric[])
+              as t(employee_id, work_date, status, first_in, last_out, worked_minutes, late, note, unpaid_days)
        on conflict (employee_id, work_date) do update
          set status = excluded.status, first_in = excluded.first_in, last_out = excluded.last_out,
-             worked_minutes = excluded.worked_minutes, late = excluded.late, locked = true, note = excluded.note
+             worked_minutes = excluded.worked_minutes, late = excluded.late, locked = true, note = excluded.note,
+             unpaid_days = excluded.unpaid_days
          where attendance_day.locked = false`,
       [
         plan.rows.map((r) => r.employee.id),
@@ -798,6 +827,7 @@ export async function lockMonthTx(tx: Queryable, actor: Actor | null, input: { y
         plan.rows.map((r) => r.frozen.workedMinutes),
         plan.rows.map((r) => r.frozen.late),
         plan.rows.map((r) => r.frozen.note),
+        plan.rows.map((r) => r.frozen.unpaid),
       ],
     );
   }
