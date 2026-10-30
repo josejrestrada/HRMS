@@ -1714,3 +1714,13 @@ textarea {
 .home-today { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .home-today h2 { margin: 0 0 6px; }
 .home-status { margin: 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* PAN reveal */
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.06em;
+}
+
+.reveal {
+  margin: 0 0 16px;
+}

@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { z } from "zod";
 import { getCurrentActor } from "@/shared/auth";
 import { todayIST } from "@/shared/dates";
-import { getEmployeeProfile, getPeopleLookups } from "@/modules/employees/data";
+import { getEmployeeProfile, getPeopleLookups, getPersonalDetails } from "@/modules/employees/data";
 import { NoAccess } from "../../_components/ui";
 import { ProfileView } from "../_components/profile-view";
 
@@ -34,12 +34,15 @@ export default async function EmployeeProfilePage({
   const profile = await getEmployeeProfile(actor, id);
   if (!profile) notFound();
   const lookups = form === "change" ? await getPeopleLookups(actor) : null;
+  const tab = first(sp.tab) === "history" ? "history" : first(sp.tab) === "statutory" ? "statutory" : "overview";
+  const personal = tab === "statutory" ? await getPersonalDetails(actor, id) : undefined;
 
   return (
     <ProfileView
       profile={profile}
       lookups={lookups}
-      tab={first(sp.tab) === "history" ? "history" : "overview"}
+      tab={tab}
+      personal={personal}
       form={form}
       error={first(sp.error)}
       saved={SAVED[first(sp.saved) ?? ""]}

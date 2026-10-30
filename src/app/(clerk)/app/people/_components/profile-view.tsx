@@ -1,16 +1,19 @@
 import Link from "next/link";
 import { formatDate, tenureText } from "@/shared/dates";
 import type { EmployeeProfile, PeopleLookups } from "@/modules/employees/data";
+import type { PersonalDetails } from "@/modules/employees/personal";
 import { Avatar, TYPE_LABELS, displayName, plural } from "../../_components/ui";
 import { changeAssignmentAction, deactivateEmployeeAction, reactivateEmployeeAction } from "../actions";
 import { EmployeeForm } from "./employee-form";
+import { PersonalForm } from "../../_components/personal-form";
 
-const SOON_TABS = ["Personal", "Statutory and bank", "Leave", "Attendance", "Documents"];
+const SOON_TABS = ["Personal", "Bank and salary", "Leave", "Attendance", "Documents"];
 
 export function ProfileView(props: {
   profile: EmployeeProfile;
   lookups: PeopleLookups | null;
-  tab: "overview" | "history";
+  tab: "overview" | "history" | "statutory";
+  personal?: PersonalDetails;
   form?: string;
   error?: string;
   saved?: string;
@@ -134,12 +137,24 @@ export function ProfileView(props: {
         <Link href={`${base}?tab=history`} className={tab === "history" ? "tab tab-current" : "tab"} aria-current={tab === "history" ? "page" : undefined}>
           History
         </Link>
+        <Link href={`${base}?tab=statutory`} className={tab === "statutory" ? "tab tab-current" : "tab"} aria-current={tab === "statutory" ? "page" : undefined}>
+          Statutory
+        </Link>
         {SOON_TABS.map((t) => (
           <span key={t} className="tab tab-soon" aria-disabled="true">
             {t} <span className="chip">Soon</span>
           </span>
         ))}
       </nav>
+
+      {tab === "statutory" && props.personal ? (
+        <section className="panel panel-form" aria-labelledby="p-statutory">
+          <div className="panel-head">
+            <h2 id="p-statutory">PAN and Aadhaar</h2>
+          </div>
+          <PersonalForm details={props.personal} isHr />
+        </section>
+      ) : null}
 
       {tab === "overview" ? (
         <div className="two-col">

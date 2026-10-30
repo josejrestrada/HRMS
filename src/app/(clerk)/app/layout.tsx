@@ -73,6 +73,17 @@ const nav = [
     ),
   },
   {
+    label: "Personal details",
+    href: "/app/personal",
+    svg: (
+      <svg {...icon}>
+        <rect x="3.5" y="5" width="17" height="14" rx="2" />
+        <circle cx="9" cy="11" r="2" />
+        <path d="M6 16c.6-1.4 1.7-2 3-2s2.4.6 3 2M14.5 10H18M14.5 13H18" />
+      </svg>
+    ),
+  },
+  {
     label: "Assistant",
     href: "/app/assistant",
     svg: (

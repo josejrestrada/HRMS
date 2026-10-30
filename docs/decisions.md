@@ -411,3 +411,23 @@ The three buttons on the HR dashboard were disabled placeholders ("Soon"). They 
   the 80-day maternity rule; the work-from-home defaults; HR-only reports with downloads audited.
 - **Still to do outside the code:** HR should check one employee's earned-leave balance against the formula, confirm the 180-day gap, and confirm the 80-day rule with Goa HR.
   Real employee data must not go into the Assistant until a paid or Workspace Gemini plan (or another provider with suitable data terms) is in place.
+
+## 2026-10-30: PAN and Aadhaar (personal details)
+
+Implements P7 (2026-10-23, accepted). The owner chose the recommended options.
+
+- **Who enters:** each employee adds their own PAN and the **last 4 digits** of their Aadhaar on a "Personal details" page; HR can enter or correct them on the profile
+  ("Statutory" tab, which replaces the "Soon" tab). Every change writes an audit entry (no values in it).
+- **Aadhaar:** only the last 4 digits and a "verified" flag (HR only can set it) are stored. The form asks for 4 digits; the full number is never typed, stored, sent or logged.
+- **PAN:** format `AAAAA9999A`, stored encrypted (AES-256-GCM, key `PII_ENCRYPTION_KEY`, kept outside the database credentials, `key_version` per row for rotation).
+  A keyed hash (HMAC-SHA-256, separate key derived from the same secret) is stored so the same PAN cannot be given to two employees. A pre-computed mask (`ABCDE••••F`) is stored
+  so that normal reads never need the key.
+- **Who sees what:** the employee sees their own masked values; HR sees everyone's masked values; nobody else sees any. Managers do not.
+  The assistant, reports, dashboards and the agent tools never read this table.
+- **Reveal:** HR only, one employee at a time, from the profile. The server checks the role, allows at most 10 reveals per HR user per hour, writes the audit entry **first** in the same
+  transaction and refuses the reveal if the audit write fails. The value is shown once on the page response and is never put in a URL, a log or the assistant.
+  An employee does not reveal their own PAN (they typed it; the mask is enough to recognise it).
+- **Storage rules:** `employee_private` cannot be deleted from or truncated; the application role gets select, insert and update only.
+- **Needs from owner / deployment:** `PII_ENCRYPTION_KEY` must be set in Vercel (Preview and Production) and **backed up somewhere safe**. If it is lost, stored PANs cannot be read and must be re-entered.
+  Rotating the key needs a later migration job that re-encrypts rows using `key_version`.
+- **Not in this slice:** UAN, bank account, IFSC and salary (same table and approach later), document uploads, and an Aadhaar verification check.

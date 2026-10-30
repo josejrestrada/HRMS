@@ -4,8 +4,10 @@ import { recordAudit } from "@/shared/audit";
 import { ForbiddenError, requireRole, type Actor, type Role } from "@/shared/roles";
 import { DomainError } from "@/shared/errors";
 import { formatDate, todayIST } from "@/shared/dates";
+import { KEY_VERSION, blindIndex, decryptField, encryptField } from "@/shared/crypto";
 import type { ChangeAssignmentInput, DeactivateInput, ListFilter, NewEmployeeInput } from "./schemas";
 import { PAGE_SIZE } from "./schemas";
+import { PAN_PATTERN, REVEAL_LIMIT_PER_HOUR, maskAadhaar, maskPan, normalizePan, type PersonalDetails, type PersonalDetailsInput } from "./personal";
 
 type ActorRow = { id: string; employee_code: string; full_name: string; roles: Role[] };
 
@@ -665,4 +667,118 @@ export async function getAssignmentSpans(
     locationName: r.location_name,
     weeklyOffDays: r.weekly_off_days ?? [0, 6],
   }));
+}
+
+
+// ---------------------------------------------------------------------------------------------
+// PAN and Aadhaar last four digits (P7). A person sees only their own masked values; HR sees
+// everyone's masked values and can reveal a PAN, which is audited first and rate limited.
+// ---------------------------------------------------------------------------------------------
+
+function assertOwnOrHr(actor: Actor | null, employeeId: string): asserts actor is Actor {
+  requireRole(actor, "employee");
+  if (employeeId !== actor.employeeId && !actor.roles.includes("hr_admin")) throw new ForbiddenError();
+}
+
+export async function getPersonalDetails(actor: Actor | null, employeeId: string, q: Queryable = { query }): Promise<PersonalDetails> {
+  assertOwnOrHr(actor, employeeId);
+  const rows = await q.query<{ pan_masked: string | null; aadhaar_last4: string | null; aadhaar_verified: boolean; updated_at: string }>(
+    "select pan_masked, aadhaar_last4, aadhaar_verified, updated_at::text from employee_private where employee_id = $1",
+    [employeeId],
+  );
+  const r = rows[0];
+  return {
+    employeeId,
+    panMasked: r?.pan_masked ?? null,
+    aadhaarMasked: r?.aadhaar_last4 ? maskAadhaar(r.aadhaar_last4) : null,
+    aadhaarVerified: r?.aadhaar_verified ?? false,
+    updatedAt: r?.updated_at ?? null,
+  };
+}
+
+/** Saves what was filled in. An empty field leaves the stored value alone. Only HR can mark Aadhaar verified. */
+export async function savePersonalDetailsTx(
+  tx: Queryable,
+  actor: Actor | null,
+  employeeId: string,
+  input: PersonalDetailsInput & { aadhaarVerified?: boolean },
+): Promise<void> {
+  assertOwnOrHr(actor, employeeId);
+  const isHr = actor.roles.includes("hr_admin");
+  const exists = await tx.query("select 1 from employee where id = $1 and status = 'active'", [employeeId]);
+  if (exists.length === 0) throw new DomainError("This employee is not active.");
+
+  const pan = input.pan ? normalizePan(input.pan) : "";
+  if (pan && !PAN_PATTERN.test(pan)) throw new DomainError("Enter the PAN as 5 letters, 4 digits and 1 letter, for example ABCDE1234F", "pan");
+  const last4 = input.aadhaarLast4 ?? "";
+  if (last4 && !/^[0-9]{4}$/.test(last4)) throw new DomainError("Enter only the last 4 digits of the Aadhaar number", "aadhaarLast4");
+  const wantsVerified = isHr && input.aadhaarVerified !== undefined;
+  if (!pan && !last4 && !wantsVerified) throw new DomainError("Enter a PAN or the last 4 Aadhaar digits to save.");
+
+  let cipher: string | null = null;
+  let hash: string | null = null;
+  let masked: string | null = null;
+  if (pan) {
+    hash = blindIndex(pan);
+    const dup = await tx.query("select 1 from employee_private where pan_hash = $1 and employee_id <> $2", [hash, employeeId]);
+    if (dup.length > 0) throw new DomainError("This PAN cannot be used. Please check it, or ask HR.", "pan");
+    cipher = encryptField(pan);
+    masked = maskPan(pan);
+  }
+
+  // A new Aadhaar number is unverified until HR says otherwise.
+  const before = (await tx.query<{ aadhaar_last4: string | null }>("select aadhaar_last4 from employee_private where employee_id = $1", [employeeId]))[0];
+  const verified = wantsVerified ? input.aadhaarVerified! : last4 && last4 !== before?.aadhaar_last4 ? false : null;
+
+  await tx.query(
+    `insert into employee_private (employee_id, pan_cipher, pan_hash, pan_masked, key_version, aadhaar_last4, aadhaar_verified, updated_by)
+     values ($1, $2, $3, $4, $5, $6, coalesce($7, false), $8)
+     on conflict (employee_id) do update set
+       pan_cipher = coalesce($2, employee_private.pan_cipher),
+       pan_hash = coalesce($3, employee_private.pan_hash),
+       pan_masked = coalesce($4, employee_private.pan_masked),
+       key_version = case when $2::text is null then employee_private.key_version else $5 end,
+       aadhaar_last4 = coalesce($6, employee_private.aadhaar_last4),
+       aadhaar_verified = coalesce($7, employee_private.aadhaar_verified),
+       updated_by = $8, updated_at = now()`,
+    [employeeId, cipher, hash, masked, KEY_VERSION, last4 || null, verified, actor.employeeId],
+  );
+  // The audit entry says what kind of detail changed, never the value.
+  const changed = [pan ? "PAN" : null, last4 ? "Aadhaar last 4" : null, wantsVerified ? "Aadhaar verified flag" : null].filter(Boolean).join(", ");
+  await recordAudit(
+    { actorEmployeeId: actor.employeeId, action: "personal_details_saved", entity: "employee_private", entityId: employeeId, summary: `Saved ${changed}` },
+    tx,
+  );
+}
+
+export async function savePersonalDetails(actor: Actor | null, employeeId: string, input: PersonalDetailsInput & { aadhaarVerified?: boolean }) {
+  assertOwnOrHr(actor, employeeId);
+  try {
+    return await transaction((tx) => savePersonalDetailsTx(tx, actor, employeeId, input));
+  } catch (err) {
+    if (isUniqueViolation(err)) throw new DomainError("This PAN cannot be used. Please check it, or ask HR.", "pan");
+    throw err;
+  }
+}
+
+/**
+ * HR only. The audit entry is written first, in the same transaction: if it cannot be written the
+ * reveal fails and nothing is returned. At most REVEAL_LIMIT_PER_HOUR per HR user per hour.
+ */
+export async function revealPanTx(tx: Queryable, actor: Actor | null, employeeId: string): Promise<string> {
+  requireRole(actor, "hr_admin");
+  const recent = await tx.query<{ n: number }>(
+    "select count(*)::int as n from audit_log where actor_employee_id = $1 and action = 'pan_revealed' and occurred_at > now() - interval '1 hour'",
+    [actor.employeeId],
+  );
+  if (recent[0].n >= REVEAL_LIMIT_PER_HOUR) throw new DomainError("You have revealed too many PAN numbers in the last hour. Please try again later.");
+  const row = (await tx.query<{ pan_cipher: string | null }>("select pan_cipher from employee_private where employee_id = $1", [employeeId]))[0];
+  if (!row?.pan_cipher) throw new DomainError("No PAN is recorded for this employee.");
+  await recordAudit({ actorEmployeeId: actor.employeeId, action: "pan_revealed", entity: "employee_private", entityId: employeeId, summary: "Revealed PAN" }, tx);
+  return decryptField(row.pan_cipher);
+}
+
+export async function revealPan(actor: Actor | null, employeeId: string) {
+  requireRole(actor, "hr_admin");
+  return transaction((tx) => revealPanTx(tx, actor, employeeId));
 }
