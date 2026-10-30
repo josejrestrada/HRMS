@@ -102,4 +102,23 @@ describe.skipIf(!enabled)("HR reports against the database", () => {
     const audit = await current!.query("select summary from audit_log where action = 'report.download' and actor_employee_id = $1", [id]);
     expect(audit.rows).toHaveLength(1);
   });
+
+  it("lists an active employee with no assignment in both headcount and leave balances, and audits the default month", async () => {
+    const actorId = await person("TESTDB-RH2");
+    const bare = (
+      await current!.query(
+        "insert into employee (employee_code, full_name, work_email, joining_date) values ('TESTDB-RB', 'DB TESTDB-RB', $1, '2024-01-01') returning id",
+        [`rb-${Math.random().toString(36).slice(2)}@example.invalid`],
+      )
+    ).rows[0].id as string;
+    const actor = hr(actorId);
+    const headcount = await reports.buildReport(actor, "headcount");
+    expect(headcount.rows.find((r) => r[0] === "TESTDB-RB")).toEqual(["TESTDB-RB", "DB TESTDB-RB", null, null, null, "2024-01-01"]);
+    expect((await reports.buildReport(actor, "leave-balances")).rows.some((r) => r[0] === "TESTDB-RB")).toBe(true);
+    void bare;
+
+    await reports.exportReportCsv(actor, "attendance-summary");
+    const audit = await current!.query("select summary from audit_log where action = 'report.download' and actor_employee_id = $1", [actorId]);
+    expect(audit.rows[0].summary).not.toContain("undefined");
+  });
 });

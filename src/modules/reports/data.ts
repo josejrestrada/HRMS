@@ -254,16 +254,20 @@ export async function buildReport(actor: Actor | null, kind: string, opts: { yea
   const today = todayIST();
 
   if (kind === "headcount") {
-    const rows = await query<{ code: string; full_name: string; department: string | null; location: string; type: string; joined: string }>(
+    const rows = await query<{ code: string; full_name: string; department: string | null; location: string; type: string | null; joined: string }>(
       `select e.employee_code as code, e.full_name, a.department, l.name as location, a.employment_type as type, e.joining_date::text as joined
-         from ${ACTIVE_NOW}
+         from employee e
+         left join employment_assignment a on a.employee_id = e.id
+          and a.effective_from <= $1::date and (a.effective_to is null or a.effective_to >= $1::date)
+         left join location l on l.id = a.location_id
+        where e.status = 'active'
         order by e.full_name, e.employee_code`,
       [today],
     );
     return {
       kind, title: "Headcount", subtitle: `${rows.length} active employees on ${today}`, numericFrom: 99,
       header: ["Employee code", "Name", "Department", "Location", "Employment type", "Joining date"],
-      rows: rows.map((r) => [r.code, r.full_name, r.department, r.location, TYPE_NAMES[r.type] ?? r.type, r.joined]),
+      rows: rows.map((r) => [r.code, r.full_name, r.department, r.location, r.type ? (TYPE_NAMES[r.type] ?? r.type) : null, r.joined]),
     };
   }
 
@@ -294,11 +298,14 @@ export async function buildReport(actor: Actor | null, kind: string, opts: { yea
 /** Builds the CSV and records who downloaded what. */
 export async function exportReportCsv(actor: Actor | null, kind: string, opts: { year?: number; month?: number } = {}) {
   const report = await buildReport(actor, kind, opts);
+  const today = todayIST();
+  const year = opts.year ?? Number(today.slice(0, 4));
+  const month = opts.month ?? Number(today.slice(5, 7));
   await recordAudit({
     actorEmployeeId: actor!.employeeId,
     action: "report.download",
     entity: "report",
-    summary: `${report.title} (${report.rows.length} rows)${kind === "attendance-summary" ? ` ${opts.year}-${String(opts.month).padStart(2, "0")}` : ""}`,
+    summary: `${report.title} (${report.rows.length} rows)${kind === "attendance-summary" ? ` ${year}-${String(month).padStart(2, "0")}` : ""}`,
   });
   return { filename: `${kind}-${todayIST()}.csv`, csv: toCsv(report.header, report.rows) };
 }

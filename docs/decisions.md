@@ -382,6 +382,8 @@ Follows DESIGN.md section 4.1 (greeting and today's status, balance cards, upcom
 
 ## 2026-10-30: Dashboard buttons and the first reports
 
+- **Status:** Accepted (2026-10-30)
+
 The three buttons on the HR dashboard were disabled placeholders ("Soon"). They now work.
 
 - **Add employee** links to `/app/people/new`. **Review leave** links to `/app/leave/approvals`. No new rules; both pages already check the HR role on the server.
@@ -394,3 +396,4 @@ The three buttons on the HR dashboard were disabled placeholders ("Soon"). They 
 - **Not in this slice (still in section 10):** leave taken by period and department, and manager (team) access to reports. Reports are HR only for now.
 - **CSV safety:** values are quoted and escaped; a cell starting with `=`, `+`, `-` or `@` gets a leading apostrophe so spreadsheets do not run it as a formula.
   Reports hold no Aadhaar, PAN or bank data. Every download is written to the audit log.
+- **Same people in every report:** Headcount and Leave balances both list every active employee, even one with no current assignment (department, location and type are then blank).
