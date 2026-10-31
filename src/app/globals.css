@@ -1750,3 +1750,23 @@ textarea {
 .bar-label:hover {
   text-decoration: underline;
 }
+
+/* the whole "Needs attention" row opens its page */
+.attn {
+  position: relative;
+}
+
+.attn a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.attn a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.attn:hover {
+  background: var(--surface-muted, rgba(127, 127, 127, 0.08));
+}
