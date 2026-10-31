@@ -131,12 +131,12 @@ function DayActions(props: {
             <div className="fix-times">
               <label>
                 <span className="sr-only">Check-in time</span>
-                <input type="time" name="in" defaultValue={defaults.in} required />
+                <input type="text" name="in" inputMode="numeric" autoComplete="off" maxLength={5} placeholder="09:30" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" defaultValue={defaults.in} required />
               </label>
               <span aria-hidden="true">to</span>
               <label>
                 <span className="sr-only">Check-out time</span>
-                <input type="time" name="out" defaultValue={defaults.out} required />
+                <input type="text" name="out" inputMode="numeric" autoComplete="off" maxLength={5} placeholder="18:00" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" defaultValue={defaults.out} required />
               </label>
             </div>
             <div className="field">

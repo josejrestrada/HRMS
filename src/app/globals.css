@@ -1647,7 +1647,10 @@ textarea {
   gap: 8px;
 }
 
-.fix-times input[type="time"] {
+.fix-times input {
+  width: 88px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
   min-height: 44px;
   padding: 0 10px;
   background: var(--bg);
