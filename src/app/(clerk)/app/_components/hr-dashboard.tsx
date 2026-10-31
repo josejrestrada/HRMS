@@ -75,6 +75,8 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 
 
 
+const personHref = (code: string) => `/app/people?q=${encodeURIComponent(code)}`;
+
 function dateRange(start: string, end: string) {
   return start === end ? formatDate(start) : `${formatDate(start)} to ${formatDate(end)}`;
 }
@@ -89,26 +91,26 @@ function greeting(): string {
   return "Good evening";
 }
 
-function Kpi(props: { icon: ReactNode; label: string; value: ReactNode; sub: ReactNode; tone?: "blue" | "green" | "violet" | "amber" }) {
+function Kpi(props: { href: string; icon: ReactNode; label: string; value: ReactNode; sub: ReactNode; tone?: "blue" | "green" | "violet" | "amber" }) {
   return (
-    <section className={`kpi kpi-${props.tone ?? "blue"}`} aria-label={props.label}>
+    <Link href={props.href} className={`kpi kpi-link kpi-${props.tone ?? "blue"}`} aria-label={`${props.label}: open details`}>
       <div className="kpi-icon">{props.icon}</div>
       <div className="kpi-body">
         <p className="kpi-label">{props.label}</p>
         <p className="kpi-value">{props.value}</p>
         <p className="kpi-sub">{props.sub}</p>
       </div>
-    </section>
+    </Link>
   );
 }
 
-function BarList({ rows }: { rows: { name: string; count: number }[] }) {
+function BarList({ rows, hrefFor }: { rows: { name: string; count: number }[]; hrefFor: (name: string) => string }) {
   const max = Math.max(...rows.map((r) => r.count), 1);
   return (
     <ul className="bars">
       {rows.map((r) => (
         <li key={r.name}>
-          <span className="bar-label">{r.name}</span>
+          <Link className="bar-label" href={hrefFor(r.name)}>{r.name}</Link>
           <span className="bar-track" aria-hidden="true">
             <span className="bar-fill" style={{ width: `${(r.count / max) * 100}%` }} />
           </span>
@@ -162,6 +164,7 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
         <Kpi
           tone="blue"
           icon={icons.people}
+          href="/app/people"
           label="Active employees"
           value={total}
           sub={
@@ -173,6 +176,7 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
         <Kpi
           tone="green"
           icon={icons.check}
+          href="/app/attendance/team"
           label="Working today"
           value={presentPct === null ? "–" : `${presentPct}%`}
           sub={
@@ -186,6 +190,7 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
         <Kpi
           tone="violet"
           icon={icons.leave}
+          href="/app/attendance/team"
           label="On leave today"
           value={onLeaveTotal}
           sub={onLeaveTotal === 0 ? "Nobody is away" : "Approved leave"}
@@ -193,6 +198,7 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
         <Kpi
           tone="amber"
           icon={icons.clock}
+          href="/app/leave/approvals"
           label="Pending approvals"
           value={pending.count}
           sub={
@@ -207,7 +213,7 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
         <div className="dash-main">
           <section className="panel" aria-labelledby="p-approvals">
             <div className="panel-head">
-              <h2 id="p-approvals">Leave requests waiting for a decision</h2>
+              <h2 id="p-approvals"><Link href="/app/leave/approvals">Leave requests waiting for a decision</Link></h2>
               <span className="chip">{pending.count} pending</span>
             </div>
             {pending.items.length === 0 ? (
@@ -235,7 +241,7 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
                           <span className="person">
                             <Avatar name={r.fullName} />
                             <span>
-                              {displayName(r.fullName)}
+                              <Link href={personHref(r.employeeCode)}>{displayName(r.fullName)}</Link>
                               <span className="sub">{r.employeeCode}</span>
                             </span>
                           </span>
@@ -258,7 +264,7 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
 
           <section className="panel" aria-labelledby="p-attendance">
             <div className="panel-head">
-              <h2 id="p-attendance">Attendance today</h2>
+              <h2 id="p-attendance"><Link href="/app/attendance/team">Attendance today</Link></h2>
               <span className="muted">{allOff ? "Weekly off or holiday" : `${attendance.recorded} of ${expected} recorded`}</span>
             </div>
             {allOff ? (
@@ -305,9 +311,9 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
           <div className="two-col">
             <section className="panel" aria-labelledby="p-loc">
               <div className="panel-head">
-                <h2 id="p-loc">Headcount by location</h2>
+                <h2 id="p-loc"><Link href="/app/people">Headcount by location</Link></h2>
               </div>
-              {headcount.byLocation.length === 0 ? <p className="empty">No data yet.</p> : <BarList rows={headcount.byLocation} />}
+              {headcount.byLocation.length === 0 ? <p className="empty">No data yet.</p> : <BarList rows={headcount.byLocation} hrefFor={() => "/app/people"} />}
               {headcount.byType.length > 0 ? (
                 <ul className="inline-list muted type-list" aria-label="By employment type">
                   {headcount.byType.map((t) => (
@@ -320,15 +326,15 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
             </section>
             <section className="panel" aria-labelledby="p-dept">
               <div className="panel-head">
-                <h2 id="p-dept">Headcount by department</h2>
+                <h2 id="p-dept"><Link href="/app/people">Headcount by department</Link></h2>
               </div>
-              {byDepartment.length === 0 ? <p className="empty">No data yet.</p> : <BarList rows={byDepartment} />}
+              {byDepartment.length === 0 ? <p className="empty">No data yet.</p> : <BarList rows={byDepartment} hrefFor={(name) => `/app/people?department=${encodeURIComponent(name)}`} />}
             </section>
           </div>
 
           <section className="panel" aria-labelledby="p-out">
             <div className="panel-head">
-              <h2 id="p-out">Who is out today</h2>
+              <h2 id="p-out"><Link href="/app/attendance/team">Who is out today</Link></h2>
               <span className="chip">{onLeaveTotal}</span>
             </div>
             {onLeaveTotal === 0 ? (
@@ -340,7 +346,7 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
                     <span className="person">
                       <Avatar name={p.fullName} />
                       <span>
-                        {displayName(p.fullName)}
+                        <Link href={personHref(p.employeeCode)}>{displayName(p.fullName)}</Link>
                         <span className="sub">{p.employeeCode}</span>
                       </span>
                     </span>
@@ -370,7 +376,7 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
                   <li className="attn">
                     <span className="attn-icon">{icons.clock}</span>
                     <span>
-                      Leave requests waiting
+                      <Link href="/app/leave/approvals">Leave requests waiting</Link>
                       <span className="sub">Needs a decision</span>
                     </span>
                     <strong>{pending.count}</strong>
@@ -380,7 +386,7 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
                   <li className="attn">
                     <span className="attn-icon">{icons.alert}</span>
                     <span>
-                      No reporting manager
+                      <Link href="/app/people">No reporting manager</Link>
                       <span className="sub">Approvals will go to HR</span>
                     </span>
                     <strong>{attention.withoutManager}</strong>
@@ -390,7 +396,7 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
                   <li className="attn">
                     <span className="attn-icon">{icons.alert}</span>
                     <span>
-                      No current assignment
+                      <Link href="/app/people">No current assignment</Link>
                       <span className="sub">Missing from location and department counts</span>
                     </span>
                     <strong>{attention.unassigned}</strong>
@@ -400,7 +406,7 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
                   <li className="attn">
                     <span className="attn-icon">{icons.people}</span>
                     <span>
-                      Not yet signed in
+                      <Link href="/app/people">Not yet signed in</Link>
                       <span className="sub">No linked account</span>
                     </span>
                     <strong>{attention.notSignedIn}</strong>
@@ -445,7 +451,7 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
 
           <section className="panel" aria-labelledby="p-joiners">
             <div className="panel-head">
-              <h2 id="p-joiners">New joiners</h2>
+              <h2 id="p-joiners"><Link href="/app/people">New joiners</Link></h2>
               <span className="muted">Last 30 days</span>
             </div>
             {recentJoiners.length === 0 ? (
@@ -457,7 +463,7 @@ export function HrDashboardView({ data, userName }: { data: HrDashboard; userNam
                     <span className="person">
                       <Avatar name={p.fullName} />
                       <span>
-                        {displayName(p.fullName)}
+                        <Link href={personHref(p.employeeCode)}>{displayName(p.fullName)}</Link>
                         <span className="sub">
                           {p.designation}, {p.location}
                         </span>

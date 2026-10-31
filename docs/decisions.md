@@ -431,3 +431,43 @@ Implements P7 (2026-10-23, accepted). The owner chose the recommended options.
 - **Needs from owner / deployment:** `PII_ENCRYPTION_KEY` must be set in Vercel (Preview and Production) and **backed up somewhere safe**. If it is lost, stored PANs cannot be read and must be re-entered.
   Rotating the key needs a later migration job that re-encrypts rows using `key_version`.
 - **Not in this slice:** UAN, bank account, IFSC and salary (same table and approach later), document uploads, and an Aadhaar verification check.
+
+## 2026-10-31: Work locations across all of Goa
+
+Owner: people are not only at Panaji and Verna; the add-person form must cover all of Goa. Owner chose "work location" (not a separate home-town field).
+
+- **Locations:** one per taluka headquarters town is added next to Panaji and Verna: Mapusa, Pernem, Bicholim, Valpoi, Ponda, Vasco da Gama, Margao, Quepem, Sanguem, Canacona, Dharbandora.
+  Codes are 3 letters (`MPS`, `PRN`, `BCH`, `VLP`, `PND`, `VSC`, `MRG`, `QPM`, `SNG`, `CNC`, `DHB`). Panaji (`PNJ`) and Verna (`VRN`) are unchanged.
+- **Same rules everywhere:** Goa state and national holidays, and Saturday and Sunday as weekly off, are copied from Panaji to each new location (all marked "not verified" like the rest),
+  so attendance, leave and reports work unchanged. Locations stay a table: HR can still ask for another town later with a new migration.
+- **Not changed:** leave and attendance rules do not depend on the location other than holidays and weekly off. Copy that names only Panaji and Verna is reworded to "Goa".
+
+## 2026-10-31: HR profile tabs (Personal, Leave, Attendance)
+
+Owner: the "Soon" tabs on an employee's profile (Personal, Bank and salary, Leave, Attendance, Documents) must work for HR.
+
+- **Personal** replaces the "Statutory" tab: basic details plus PAN and Aadhaar (masked, with the audited Reveal) in one place. The old `?tab=statutory` link opens it.
+- **Leave** (HR only, read only): balances of CL, SL, EL and comp-off with days on hold, and that person's last 25 requests with status. Approving and cancelling stay on the approvals page.
+- **Attendance** (HR only, read only): one month at a time, day by day (first in, last out, hours, status, note) with the month totals. Locked months show the frozen copy, like the attendance report.
+- Each read checks the HR role on the server and does not write an audit entry (same as the other HR reads of non-private data).
+- **Still "Soon", needs owner decisions:** Bank and salary (which fields, who may see salary, encryption like PAN) and Documents (where files are stored, which types, size limit, who can download).
+
+## 2026-10-31: Bank and salary (HR only)
+
+Owner chose to build it like PAN (decision P7 approach). Applies to the "Bank and salary" tab on an employee's profile.
+
+- **Who:** HR only, to enter, see masked values and reveal. Employees do not see or edit it, managers never do, and the assistant, reports and dashboards never read it.
+- **What is kept:** account holder name, bank name, IFSC (format `AAAA0XXXXXX`), bank account number, UAN (12 digits) and monthly gross salary in rupees.
+- **Bank account number, UAN and salary** are stored encrypted (AES-256-GCM, same `PII_ENCRYPTION_KEY`, `key_version` per row). Account number and UAN keep a pre-computed mask
+  (`••••••1234`, `••••••••1234`) so normal reads never need the key; the salary shows `••••••` until revealed. Account holder, bank name and IFSC are not secret on their own and are stored as text.
+- **Reveal:** one value at a time, HR only. The audit entry is written first in the same transaction and the reveal fails if it cannot be written. At most 10 reveals per HR user per hour
+  (counted across account, UAN and salary, separately from PAN). Shown for 30 seconds, never put in a URL or log.
+- **Audit:** every save writes an entry naming the kinds of detail changed, never values. A salary change records only that the salary was changed.
+- **Storage rules:** `employee_bank` cannot be deleted from or truncated; the application role gets select, insert and update only.
+- **Kept simple on purpose:** one current salary figure, no salary history, no breakdown (basic, HRA, deductions) and no payslips yet. Those need their own decision when payroll is in scope.
+
+## 2026-10-31: Dashboard tiles and rows are links
+
+Owner: everything that looks like a button on the HR dashboard must be clickable. The four tiles, the panel headings, the "Needs attention" rows, the names in the tables and lists, and the
+headcount bars now link to the page that has the detail: Active employees and the headcount bars to People (departments filter People), Working today and On leave today to the
+attendance team view, Pending approvals and the leave and attention rows to Leave approvals, and a person's name to People searched by their employee code. No data changes.

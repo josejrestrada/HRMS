@@ -247,6 +247,59 @@ export async function getLeaveOverview(actor: Actor | null): Promise<LeaveOvervi
   };
 }
 
+export type EmployeeLeaveView = { today: string; balances: Balance[]; requests: Omit<LeaveRequestRow, "canCancel">[] };
+
+/** HR: one person's balances and last 25 requests, read only. */
+export async function getEmployeeLeaveForHr(actor: Actor | null, employeeId: string): Promise<EmployeeLeaveView> {
+  requireRole(actor, "hr_admin");
+  const today = todayIST();
+  const [balances, requests] = await Promise.all([
+    balancesFor({ query }, employeeId, BALANCE_TYPES),
+    query<{
+      id: string;
+      code: string;
+      name: string;
+      start_date: string;
+      end_date: string;
+      day_part: DayPart;
+      days: number;
+      lop_days: number;
+      status: LeaveRequestRow["status"];
+      reason: string | null;
+      decision_note: string | null;
+      certificate_required: boolean;
+    }>(
+      `select lr.id, t.code, t.name, lr.start_date::text, lr.end_date::text, lr.day_part, lr.days::float8 as days,
+              lr.lop_days::float8 as lop_days, lr.status, lr.reason, lr.decision_note, lr.certificate_required
+         from leave_request lr join leave_type t on t.id = lr.leave_type_id
+        where lr.employee_id = $1
+        order by lr.start_date desc, lr.created_at desc
+        limit 25`,
+      [employeeId],
+    ),
+  ]);
+  const compoff = await compoffBalance({ query }, employeeId, today);
+  if (compoff) balances.push(compoff);
+  return {
+    today,
+    balances,
+    requests: requests.map((r) => ({
+      id: r.id,
+      typeCode: r.code,
+      typeName: r.name,
+      startDate: r.start_date,
+      endDate: r.end_date,
+      dayPart: r.day_part,
+      days: r.days,
+      lopDays: r.lop_days,
+      status: r.status,
+      reason: r.reason,
+      decisionNote: r.decision_note,
+      certificateRequired: r.certificate_required,
+    })),
+  };
+}
+
 export type BalanceReportRow = { code: string; fullName: string; department: string | null; available: Record<string, number> };
 
 /** HR: available days (balance minus held) of CL, SL and EL for every active employee. */

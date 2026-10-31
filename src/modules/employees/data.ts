@@ -7,6 +7,7 @@ import { formatDate, todayIST } from "@/shared/dates";
 import { KEY_VERSION, blindIndex, decryptField, encryptField } from "@/shared/crypto";
 import type { ChangeAssignmentInput, DeactivateInput, ListFilter, NewEmployeeInput } from "./schemas";
 import { PAGE_SIZE } from "./schemas";
+import { BANK_REVEAL_LIMIT_PER_HOUR, maskDigits, type BankDetails, type BankInput, type BankRevealField } from "./bank";
 import { PAN_PATTERN, REVEAL_LIMIT_PER_HOUR, maskAadhaar, maskPan, normalizePan, type PersonalDetails, type PersonalDetailsInput } from "./personal";
 
 type ActorRow = { id: string; employee_code: string; full_name: string; roles: Role[] };
@@ -781,4 +782,111 @@ export async function revealPanTx(tx: Queryable, actor: Actor | null, employeeId
 export async function revealPan(actor: Actor | null, employeeId: string) {
   requireRole(actor, "hr_admin");
   return transaction((tx) => revealPanTx(tx, actor, employeeId));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Bank and salary (HR only, decision 2026-10-31)
+// ---------------------------------------------------------------------------------------------
+
+export async function getBankDetails(actor: Actor | null, employeeId: string, q: Queryable = { query }): Promise<BankDetails> {
+  requireRole(actor, "hr_admin");
+  const rows = await q.query<{
+    account_holder: string | null;
+    bank_name: string | null;
+    ifsc: string | null;
+    account_masked: string | null;
+    uan_masked: string | null;
+    has_salary: boolean;
+    updated_at: string;
+  }>(
+    `select account_holder, bank_name, ifsc, account_masked, uan_masked, (salary_cipher is not null) as has_salary, updated_at::text
+       from employee_bank where employee_id = $1`,
+    [employeeId],
+  );
+  const r = rows[0];
+  return {
+    employeeId,
+    accountHolder: r?.account_holder ?? null,
+    bankName: r?.bank_name ?? null,
+    ifsc: r?.ifsc ?? null,
+    accountMasked: r?.account_masked ?? null,
+    uanMasked: r?.uan_masked ?? null,
+    hasSalary: r?.has_salary ?? false,
+    updatedAt: r?.updated_at ?? null,
+  };
+}
+
+/** Saves what was filled in. An empty field leaves the stored value alone. */
+export async function saveBankDetailsTx(tx: Queryable, actor: Actor | null, employeeId: string, input: BankInput): Promise<void> {
+  requireRole(actor, "hr_admin");
+  const exists = await tx.query("select 1 from employee where id = $1 and status = 'active'", [employeeId]);
+  if (exists.length === 0) throw new DomainError("This employee is not active.");
+
+  const holder = input.accountHolder || null;
+  const bankName = input.bankName || null;
+  const ifsc = input.ifsc || null;
+  const account = input.account || null;
+  const uan = input.uan || null;
+  const salary = input.salary || null;
+  if (!holder && !bankName && !ifsc && !account && !uan && !salary) throw new DomainError("Fill in at least one detail to save.");
+
+  await tx.query(
+    `insert into employee_bank
+       (employee_id, account_holder, bank_name, ifsc, account_cipher, account_masked, uan_cipher, uan_masked, salary_cipher, key_version, updated_by)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     on conflict (employee_id) do update set
+       account_holder = coalesce($2, employee_bank.account_holder),
+       bank_name = coalesce($3, employee_bank.bank_name),
+       ifsc = coalesce($4, employee_bank.ifsc),
+       account_cipher = coalesce($5, employee_bank.account_cipher),
+       account_masked = coalesce($6, employee_bank.account_masked),
+       uan_cipher = coalesce($7, employee_bank.uan_cipher),
+       uan_masked = coalesce($8, employee_bank.uan_masked),
+       salary_cipher = coalesce($9, employee_bank.salary_cipher),
+       key_version = $10, updated_by = $11, updated_at = now()`,
+    [
+      employeeId, holder, bankName, ifsc,
+      account ? encryptField(account) : null, account ? maskDigits(account) : null,
+      uan ? encryptField(uan) : null, uan ? maskDigits(uan) : null,
+      salary ? encryptField(salary) : null,
+      KEY_VERSION, actor.employeeId,
+    ],
+  );
+  // The audit entry says what kind of detail changed, never the value.
+  const changed = [holder || bankName || ifsc ? "bank name and IFSC" : null, account ? "account number" : null, uan ? "UAN" : null, salary ? "salary" : null]
+    .filter(Boolean)
+    .join(", ");
+  await recordAudit({ actorEmployeeId: actor.employeeId, action: "bank_details_saved", entity: "employee_bank", entityId: employeeId, summary: `Saved ${changed}` }, tx);
+}
+
+export async function saveBankDetails(actor: Actor | null, employeeId: string, input: BankInput) {
+  requireRole(actor, "hr_admin");
+  return transaction((tx) => saveBankDetailsTx(tx, actor, employeeId, input));
+}
+
+const BANK_COLUMN: Record<BankRevealField, string> = { account: "account_cipher", uan: "uan_cipher", salary: "salary_cipher" };
+const BANK_LABEL: Record<BankRevealField, string> = { account: "account number", uan: "UAN", salary: "salary" };
+
+/** HR only. Audit first in the same transaction; at most BANK_REVEAL_LIMIT_PER_HOUR per HR user per hour. */
+export async function revealBankFieldTx(tx: Queryable, actor: Actor | null, employeeId: string, field: BankRevealField): Promise<string> {
+  requireRole(actor, "hr_admin");
+  const column = BANK_COLUMN[field];
+  if (!column) throw new DomainError("Choose what to reveal.");
+  const recent = await tx.query<{ n: number }>(
+    "select count(*)::int as n from audit_log where actor_employee_id = $1 and action like 'bank_%_revealed' and occurred_at > now() - interval '1 hour'",
+    [actor.employeeId],
+  );
+  if (recent[0].n >= BANK_REVEAL_LIMIT_PER_HOUR) throw new DomainError("You have revealed too many bank details in the last hour. Please try again later.");
+  const row = (await tx.query<Record<string, string | null>>(`select ${column} as cipher from employee_bank where employee_id = $1`, [employeeId]))[0];
+  if (!row?.cipher) throw new DomainError(`No ${BANK_LABEL[field]} is recorded for this employee.`);
+  await recordAudit(
+    { actorEmployeeId: actor.employeeId, action: `bank_${field}_revealed`, entity: "employee_bank", entityId: employeeId, summary: `Revealed ${BANK_LABEL[field]}` },
+    tx,
+  );
+  return decryptField(row.cipher);
+}
+
+export async function revealBankField(actor: Actor | null, employeeId: string, field: BankRevealField) {
+  requireRole(actor, "hr_admin");
+  return transaction((tx) => revealBankFieldTx(tx, actor, employeeId, field));
 }

@@ -2,7 +2,9 @@ import { notFound } from "next/navigation";
 import { z } from "zod";
 import { getCurrentActor } from "@/shared/auth";
 import { todayIST } from "@/shared/dates";
-import { getEmployeeProfile, getPeopleLookups, getPersonalDetails } from "@/modules/employees/data";
+import { getEmployeeMonthForHr } from "@/modules/attendance/data";
+import { getEmployeeLeaveForHr } from "@/modules/leave/data";
+import { getEmployeeProfile, getPeopleLookups, getBankDetails, getPersonalDetails } from "@/modules/employees/data";
 import { NoAccess } from "../../_components/ui";
 import { ProfileView } from "../_components/profile-view";
 
@@ -34,8 +36,16 @@ export default async function EmployeeProfilePage({
   const profile = await getEmployeeProfile(actor, id);
   if (!profile) notFound();
   const lookups = form === "change" ? await getPeopleLookups(actor) : null;
-  const tab = first(sp.tab) === "history" ? "history" : first(sp.tab) === "statutory" ? "statutory" : "overview";
-  const personal = tab === "statutory" ? await getPersonalDetails(actor, id) : undefined;
+  const t = first(sp.tab);
+  const tab = t === "history" ? "history" : t === "personal" || t === "statutory" ? "personal" : t === "bank" ? "bank" : t === "leave" ? "leave" : t === "attendance" ? "attendance" : "overview";
+  const personal = tab === "personal" ? await getPersonalDetails(actor, id) : undefined;
+  const bank = tab === "bank" ? await getBankDetails(actor, id) : undefined;
+  const leave = tab === "leave" ? await getEmployeeLeaveForHr(actor, id) : undefined;
+  const today = todayIST();
+  const m = /^(\d{4})-(\d{2})$/.exec(first(sp.m) ?? "");
+  const year = m ? Number(m[1]) : Number(today.slice(0, 4));
+  const monthNo = m && Number(m[2]) >= 1 && Number(m[2]) <= 12 ? Number(m[2]) : Number(today.slice(5, 7));
+  const month = tab === "attendance" ? await getEmployeeMonthForHr(actor, id, year, monthNo) : undefined;
 
   return (
     <ProfileView
@@ -43,11 +53,14 @@ export default async function EmployeeProfilePage({
       lookups={lookups}
       tab={tab}
       personal={personal}
+      bank={bank}
+      leave={leave}
+      month={month}
       form={form}
       error={first(sp.error)}
       saved={SAVED[first(sp.saved) ?? ""]}
       actorEmployeeId={actor.employeeId}
-      today={todayIST()}
+      today={today}
     />
   );
 }

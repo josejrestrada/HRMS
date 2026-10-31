@@ -2,18 +2,26 @@ import Link from "next/link";
 import { formatDate, tenureText } from "@/shared/dates";
 import type { EmployeeProfile, PeopleLookups } from "@/modules/employees/data";
 import type { PersonalDetails } from "@/modules/employees/personal";
+import type { EmployeeLeaveView } from "@/modules/leave/data";
+import type { EmployeeMonth } from "@/modules/attendance/data";
 import { Avatar, TYPE_LABELS, displayName, plural } from "../../_components/ui";
 import { changeAssignmentAction, deactivateEmployeeAction, reactivateEmployeeAction } from "../actions";
 import { EmployeeForm } from "./employee-form";
 import { PersonalForm } from "../../_components/personal-form";
+import type { BankDetails } from "@/modules/employees/bank";
+import { BankForm } from "./bank-form";
+import { ProfileAttendance, ProfileLeave } from "./profile-leave-attendance";
 
-const SOON_TABS = ["Personal", "Bank and salary", "Leave", "Attendance", "Documents"];
+const SOON_TABS = ["Documents"];
 
 export function ProfileView(props: {
   profile: EmployeeProfile;
   lookups: PeopleLookups | null;
-  tab: "overview" | "history" | "statutory";
+  tab: "overview" | "history" | "personal" | "bank" | "leave" | "attendance";
   personal?: PersonalDetails;
+  bank?: BankDetails;
+  leave?: EmployeeLeaveView;
+  month?: EmployeeMonth;
   form?: string;
   error?: string;
   saved?: string;
@@ -137,9 +145,18 @@ export function ProfileView(props: {
         <Link href={`${base}?tab=history`} className={tab === "history" ? "tab tab-current" : "tab"} aria-current={tab === "history" ? "page" : undefined}>
           History
         </Link>
-        <Link href={`${base}?tab=statutory`} className={tab === "statutory" ? "tab tab-current" : "tab"} aria-current={tab === "statutory" ? "page" : undefined}>
-          Statutory
-        </Link>
+        {(
+          [
+            ["personal", "Personal"],
+            ["bank", "Bank and salary"],
+            ["leave", "Leave"],
+            ["attendance", "Attendance"],
+          ] as const
+        ).map(([key, label]) => (
+          <Link key={key} href={`${base}?tab=${key}`} className={tab === key ? "tab tab-current" : "tab"} aria-current={tab === key ? "page" : undefined}>
+            {label}
+          </Link>
+        ))}
         {SOON_TABS.map((t) => (
           <span key={t} className="tab tab-soon" aria-disabled="true">
             {t} <span className="chip">Soon</span>
@@ -147,14 +164,51 @@ export function ProfileView(props: {
         ))}
       </nav>
 
-      {tab === "statutory" && props.personal ? (
-        <section className="panel panel-form" aria-labelledby="p-statutory">
+      {tab === "personal" && props.personal ? (
+        <>
+          <section className="panel" aria-labelledby="p-basic-tab">
+            <div className="panel-head">
+              <h2 id="p-basic-tab">Basic details</h2>
+            </div>
+            <dl className="facts">
+              <div>
+                <dt>Full name</dt>
+                <dd>{displayName(profile.fullName)}</dd>
+              </div>
+              <div>
+                <dt>Work email</dt>
+                <dd>{profile.workEmail}</dd>
+              </div>
+              <div>
+                <dt>Gender</dt>
+                <dd>{profile.gender ? profile.gender[0].toUpperCase() + profile.gender.slice(1) : "Not stated"}</dd>
+              </div>
+              <div>
+                <dt>Date of birth</dt>
+                <dd>{profile.dateOfBirth ? formatDate(profile.dateOfBirth) : "Not stated"}</dd>
+              </div>
+            </dl>
+          </section>
+          <section className="panel panel-form" aria-labelledby="p-statutory">
+            <div className="panel-head">
+              <h2 id="p-statutory">PAN and Aadhaar</h2>
+            </div>
+            <PersonalForm details={props.personal} isHr />
+          </section>
+        </>
+      ) : null}
+
+      {tab === "bank" && props.bank ? (
+        <section className="panel panel-form" aria-labelledby="p-bank">
           <div className="panel-head">
-            <h2 id="p-statutory">PAN and Aadhaar</h2>
+            <h2 id="p-bank">Bank and salary</h2>
           </div>
-          <PersonalForm details={props.personal} isHr />
+          <BankForm details={props.bank} />
         </section>
       ) : null}
+
+      {tab === "leave" && props.leave ? <ProfileLeave data={props.leave} /> : null}
+      {tab === "attendance" && props.month ? <ProfileAttendance data={props.month} base={base} /> : null}
 
       {tab === "overview" ? (
         <div className="two-col">

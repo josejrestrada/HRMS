@@ -99,8 +99,8 @@ export default function HomePage() {
             />
             <h1>People operations for Konkan Coastal Foods</h1>
             <p className="lead">
-              Employee records, attendance and leave in one place, for the Panaji head office and
-              the Verna plant.
+              Employee records, attendance and leave in one place, for the Panaji head office, the Verna plant
+              and people across Goa.
             </p>
             <div className="hero-actions">
               <Link className="btn btn-primary" href="/sign-in">
@@ -134,7 +134,7 @@ export default function HomePage() {
 
       <footer className="site-footer">
         <div className="container">
-          <p>&copy; {year} Konkan Coastal Foods. Panaji and Verna, Goa.</p>
+          <p>&copy; {year} Konkan Coastal Foods, Goa.</p>
         </div>
       </footer>
     </>

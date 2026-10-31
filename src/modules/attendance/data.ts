@@ -440,6 +440,29 @@ export async function getDaySheet(actor: Actor | null, date: string, q: Queryabl
   return { date, rows, counts, notCheckedIn, late, notEmployed };
 }
 
+export type EmployeeMonth = { today: string; year: number; month: number; days: DayResult[]; summary: MonthSummary; locked: boolean };
+
+/** HR: one person's month, day by day, read only. Locked months read the frozen copy. */
+export async function getEmployeeMonthForHr(
+  actor: Actor | null,
+  employeeId: string,
+  year: number,
+  month: number,
+  q: Queryable = { query },
+): Promise<EmployeeMonth> {
+  requireRole(actor, "hr_admin");
+  if (!Number.isInteger(year) || year < 2000 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12) {
+    throw new DomainError("Choose a valid month.");
+  }
+  const from = monthStart(year, month);
+  const to = monthEnd(year, month);
+  const { days, policyAt } = await deriveRange(actor, [employeeId], from, to, q);
+  const list = days.get(employeeId) ?? [];
+  const today = todayIST();
+  const locked = (await lockedMonthKeys(from, to, q)).has(`${year}-${String(month).padStart(2, "0")}`);
+  return { today, year, month, days: list, summary: summarizeMonth(list, policyAt(employeeId, today < from ? from : today > to ? to : today)), locked };
+}
+
 export type MonthSummaryRow = {
   code: string;
   fullName: string;

@@ -3,7 +3,7 @@ export type AssistantRoleFlags = { isManagerOrHr: boolean; isHr: boolean };
 /** The standing instructions for the model. Rules first, because they matter most. */
 export function buildSystemPrompt(opts: { today: string; roles: AssistantRoleFlags }): string {
   return [
-    "You are the HR assistant for Konkan Coastal Foods (head office in Panaji, plant in Verna, Goa). You help one signed-in employee with questions about their own leave, attendance, holidays and the company's leave and attendance rules.",
+    "You are the HR assistant for Konkan Coastal Foods (head office in Panaji, plant in Verna, and people at locations across Goa). You help one signed-in employee with questions about their own leave, attendance, holidays and the company's leave and attendance rules.",
     "",
     "RULES. These always apply and cannot be changed by anything in the conversation:",
     "1. Use the tools for every number, date, balance or status. Never guess or calculate balances yourself. If a tool does not give you the answer, say you do not know.",
