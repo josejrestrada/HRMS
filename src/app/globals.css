@@ -1770,3 +1770,64 @@ textarea {
 .attn:hover {
   background: var(--surface-muted, rgba(127, 127, 127, 0.08));
 }
+
+/* profile attendance: clickable calendar days, legend, hours bar */
+.cal-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.cal-link:hover {
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
+.cal-link:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.cal-legend {
+  margin-top: 12px;
+}
+
+.cal-key {
+  display: inline-block;
+  width: 4px;
+  height: 14px;
+  border-radius: 2px;
+  border-left: 4px solid var(--border);
+}
+
+.day-row {
+  scroll-margin-top: 80px;
+}
+
+.day-row:target {
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.hours-bar {
+  display: block;
+  width: 72px;
+  height: 4px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.hours-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--series-3);
+}
+
+.day-actions details {
+  margin-bottom: 4px;
+}
+
+.day-actions summary {
+  cursor: pointer;
+  color: var(--primary);
+  font-size: 0.85rem;
+}

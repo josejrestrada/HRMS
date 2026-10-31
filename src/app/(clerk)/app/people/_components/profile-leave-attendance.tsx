@@ -159,70 +159,157 @@ export function ProfileAttendance({ data, base, employeeId }: { data: EmployeeMo
   const prev = data.month === 1 ? { y: data.year - 1, m: 12 } : { y: data.year, m: data.month - 1 };
   const next = data.month === 12 ? { y: data.year + 1, m: 1 } : { y: data.year, m: data.month + 1 };
   const link = (y: number, m: number) => `${base}?tab=attendance&m=${y}-${String(m).padStart(2, "0")}`;
-  const counts = data.summary.counts;
-  const totals: [string, number][] = [
-    ["Present", counts.present],
-    ["Work from home", counts.wfh],
-    ["Half days", counts.half_day],
-    ["On leave", counts.leave],
-    ["Absent", counts.absent + counts.missed_punch],
-    ["Late marks", data.summary.lateMarks],
+  const s = data.summary;
+  const stats: [string, number][] = [
+    ["Present", s.counts.present],
+    ["Half days", s.counts.half_day],
+    ["On leave", s.counts.leave],
+    ["Work from home", s.counts.wfh],
+    ["Absent", s.counts.absent + s.counts.missed_punch],
   ];
+  const firstWeekday = data.days.length > 0 ? (new Date(`${data.days[0].date}T00:00:00Z`).getUTCDay() + 6) % 7 : 0;
+  const needsFix = data.days.filter((d) => data.extras[d.date]?.canFix || data.extras[d.date]?.pending).length;
+  const legend = ["present", "half_day", "wfh", "leave", "absent", "holiday", "weekly_off"] as const;
+
   return (
-    <section className="panel" aria-labelledby="p-attendance">
-      <div className="panel-head">
-        <h2 id="p-attendance">
+    <>
+      <div className="month-nav">
+        <Link className="btn btn-secondary btn-small" href={link(prev.y, prev.m)} aria-label="Previous month">
+          Previous
+        </Link>
+        <h2>
           {MONTH_NAMES[data.month - 1]} {data.year}
         </h2>
-        <span>
-          <Link href={link(prev.y, prev.m)}>Previous</Link> · <Link href={link(next.y, next.m)}>Next</Link>
-        </span>
+        <Link className="btn btn-secondary btn-small" href={link(next.y, next.m)} aria-label="Next month">
+          Next
+        </Link>
       </div>
-      {data.locked ? <p className="muted">This month is locked. The figures are the frozen copy.</p> : null}
-      <p className="chips">
-        {totals.map(([label, n]) => (
-          <span key={label} className="chip">
-            {label}: {n}
-          </span>
+      {data.locked ? (
+        <div className="alert alert-ok" role="status">
+          This month is locked. The figures are final and its days can no longer be changed.
+        </div>
+      ) : null}
+
+      <div className="att-summary">
+        {stats.map(([label, n]) => (
+          <div key={label} className="att-stat">
+            <p className="att-stat-value">{n}</p>
+            <p className="muted">{label}</p>
+          </div>
         ))}
-      </p>
-      <div className="table-wrap">
-        <table className="people-table">
-          <thead>
-            <tr>
-              <th scope="col">Date</th>
-              <th scope="col">In</th>
-              <th scope="col">Out</th>
-              <th scope="col">Worked</th>
-              <th scope="col">Status</th>
-              <th scope="col">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.days
-              .filter((d) => d.employed)
-              .map((d) => (
-                <tr key={d.date}>
-                  <td data-label="Date">
-                    {formatDate(d.date)}
-                    <span className="sub">{weekdayName(d.date)}</span>
-                  </td>
-                  <td data-label="In">{d.firstIn ?? "–"}</td>
-                  <td data-label="Out">{d.lastOut ?? "–"}</td>
-                  <td data-label="Worked">{d.workedMinutes ? formatMinutes(d.workedMinutes) : "–"}</td>
-                  <td data-label="Status">
-                    <StatusChip status={d.status} provisional={d.provisional} />
-                    {d.late ? <span className="sub">Late</span> : null}
-                    {d.note && STATUS_INFO[d.status] ? <span className="sub">{d.note}</span> : null}
-                  </td>
-                  <td data-label="Actions">
-                    <DayActions day={d.date} extras={data.extras[d.date]} defaults={data.defaults} employeeId={employeeId} monthKey={monthKey} />
-                  </td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
+        <div className="att-stat">
+          <p className="att-stat-value">
+            {s.lateMarks} <span className="unit">of {s.lateLimit}</span>
+          </p>
+          <p className="muted">Late marks</p>
+        </div>
       </div>
-    </section>
+
+      <section className="panel" aria-label="Calendar">
+        <div className="cal" role="grid" aria-label={`${MONTH_NAMES[data.month - 1]} ${data.year}`}>
+          {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
+            <div key={d} className="cal-head" role="columnheader">
+              {d}
+            </div>
+          ))}
+          {Array.from({ length: firstWeekday }).map((_, i) => (
+            <div key={`b${i}`} className="cal-blank" />
+          ))}
+          {data.days.map((d) => {
+            const info = STATUS_INFO[d.status];
+            const x = data.extras[d.date];
+            const inner = (
+              <>
+                <span className="cal-date">{Number(d.date.slice(8))}</span>
+                {d.employed && d.status !== "upcoming" ? (
+                  <span className="cal-status">{d.provisional && d.status === "absent" ? "Not in yet" : info.short}</span>
+                ) : null}
+                {d.firstIn ? (
+                  <span className="cal-times">
+                    {d.firstIn}
+                    {d.lastOut ? `–${d.lastOut}` : ""}
+                  </span>
+                ) : null}
+                {d.late ? <span className="cal-late">Late</span> : null}
+                {x?.pending ? <span className="cal-late">Fix to review</span> : x?.canFix ? <span className="cal-late">Needs fix</span> : null}
+              </>
+            );
+            const cls = `cal-cell ${d.employed ? info.cls : "st-upcoming"}${d.date === data.today ? " cal-today" : ""}`;
+            return d.employed ? (
+              <a key={d.date} href={`#day-${d.date}`} role="gridcell" className={`${cls} cal-link`} aria-label={`${formatDate(d.date)}: ${info.label}`}>
+                {inner}
+              </a>
+            ) : (
+              <div key={d.date} role="gridcell" className={cls}>
+                {inner}
+              </div>
+            );
+          })}
+        </div>
+        <ul className="legend cal-legend" aria-label="Colours">
+          {legend.map((k) => (
+            <li key={k}>
+              <span className={`cal-key ${STATUS_INFO[k].cls}`} aria-hidden="true" />
+              <span>{STATUS_INFO[k].label}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="panel" aria-labelledby="p-days">
+        <div className="panel-head">
+          <h2 id="p-days">Day by day</h2>
+          {needsFix > 0 ? <span className="chip chip-warn">{needsFix} to act on</span> : <span className="muted">Nothing to act on</span>}
+        </div>
+        <div className="table-wrap">
+          <table className="people-table">
+            <thead>
+              <tr>
+                <th scope="col">Date</th>
+                <th scope="col">In</th>
+                <th scope="col">Out</th>
+                <th scope="col">Worked</th>
+                <th scope="col">Status</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.days
+                .filter((d) => d.employed)
+                .map((d) => (
+                  <tr key={d.date} id={`day-${d.date}`} className="day-row">
+                    <td data-label="Date">
+                      {formatDate(d.date)}
+                      <span className="sub">{weekdayName(d.date)}</span>
+                    </td>
+                    <td data-label="In">{d.firstIn ?? "–"}</td>
+                    <td data-label="Out">{d.lastOut ?? "–"}</td>
+                    <td data-label="Worked">
+                      {d.workedMinutes ? (
+                        <>
+                          {formatMinutes(d.workedMinutes)}
+                          <span className="hours-bar" aria-hidden="true">
+                            <span style={{ width: `${Math.min(100, Math.round((d.workedMinutes / 480) * 100))}%` }} />
+                          </span>
+                        </>
+                      ) : (
+                        "–"
+                      )}
+                    </td>
+                    <td data-label="Status">
+                      <StatusChip status={d.status} provisional={d.provisional} />
+                      {d.late ? <span className="sub">Late</span> : null}
+                      {d.note && STATUS_INFO[d.status] ? <span className="sub">{d.note}</span> : null}
+                    </td>
+                    <td data-label="Actions">
+                      <DayActions day={d.date} extras={data.extras[d.date]} defaults={data.defaults} employeeId={employeeId} monthKey={monthKey} />
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
   );
 }
