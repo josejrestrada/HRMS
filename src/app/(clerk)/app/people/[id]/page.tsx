@@ -16,6 +16,9 @@ const SAVED: Record<string, string> = {
   assignment: "Assignment changed. The previous one is kept in History.",
   deactivated: "Employee deactivated.",
   reactivated: "Employee reactivated.",
+  dayfixed: "Day fixed. It counts straight away and is recorded as done by you.",
+  fixapproved: "Fix approved.",
+  fixrejected: "Fix rejected.",
 };
 
 export default async function EmployeeProfilePage({

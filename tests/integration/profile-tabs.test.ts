@@ -75,4 +75,31 @@ describe.skipIf(!enabled)("HR profile tabs against the database", () => {
     expect(m.days.every((d) => d.employed)).toBe(true);
     await expect(attendance.getEmployeeMonthForHr(hr, id, 2026, 13)).rejects.toThrow();
   });
+
+  it("lets HR fix a missed-punch day at once with a reason, and shows the punches", async () => {
+    const id = await person("TESTDB-TF");
+    const hrId = await person("TESTDB-TG");
+    const hr = actorFor(hrId, ["employee", "hr_admin"]);
+    const tx = { query: async (text: string, params: unknown[] = []) => (await current!.query(text, params)).rows };
+    const date = "2026-10-14"; // a Wednesday
+    await current!.query("insert into punch (employee_id, punched_at, direction) values ($1, $2::timestamptz, 'in')", [id, `${date}T09:20:00+05:30`]);
+
+    let month = await attendance.getEmployeeMonthForHr(hr, id, 2026, 10);
+    expect(month.extras[date].punches).toEqual([{ time: "09:20", direction: "in" }]);
+    expect(month.extras[date].canFix).toBe(true);
+
+    await expect(attendance.hrFixDayTx(tx, hr, id, { date, in: "09:20", out: "17:50", reason: "" })).rejects.toThrow(/reason/);
+    await expect(attendance.hrFixDayTx(tx, hr, hrId, { date, in: "09:20", out: "17:50", reason: "own day" })).rejects.toThrow();
+    await expect(attendance.hrFixDayTx(tx, actorFor(id, ["employee"]), id, { date, in: "09:20", out: "17:50", reason: "self" })).rejects.toThrow();
+
+    await attendance.hrFixDayTx(tx, hr, id, { date, in: "09:20", out: "17:50", reason: "Machine was down" });
+    month = await attendance.getEmployeeMonthForHr(hr, id, 2026, 10);
+    expect(month.extras[date].canFix).toBe(false);
+    expect(month.days.find((d) => d.date === date)?.regularized).toBe(true);
+    const row = (await current!.query("select status, approver_id from regularization where employee_id = $1", [id])).rows[0];
+    expect(row).toMatchObject({ status: "approved", approver_id: hrId });
+    const audit = (await current!.query("select action from audit_log where entity = 'regularization' and actor_employee_id = $1", [hrId])).rows;
+    expect(audit.map((a) => a.action)).toContain("regularization_hr_fixed");
+    await expect(attendance.hrFixDayTx(tx, hr, id, { date, in: "09:20", out: "17:50", reason: "again" })).rejects.toThrow(/does not need fixing/);
+  });
 });

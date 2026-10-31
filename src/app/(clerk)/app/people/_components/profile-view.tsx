@@ -208,7 +208,7 @@ export function ProfileView(props: {
       ) : null}
 
       {tab === "leave" && props.leave ? <ProfileLeave data={props.leave} /> : null}
-      {tab === "attendance" && props.month ? <ProfileAttendance data={props.month} base={base} /> : null}
+      {tab === "attendance" && props.month ? <ProfileAttendance data={props.month} base={base} employeeId={profile.id} /> : null}
 
       {tab === "overview" ? (
         <div className="two-col">

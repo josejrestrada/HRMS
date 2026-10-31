@@ -440,9 +440,23 @@ export async function getDaySheet(actor: Actor | null, date: string, q: Queryabl
   return { date, rows, counts, notCheckedIn, late, notEmployed };
 }
 
-export type EmployeeMonth = { today: string; year: number; month: number; days: DayResult[]; summary: MonthSummary; locked: boolean };
+export type HrDayExtras = {
+  punches: PunchTime[];
+  pending: { id: string; inTime: string; outTime: string; reason: string } | null;
+  canFix: boolean;
+};
+export type EmployeeMonth = {
+  today: string;
+  year: number;
+  month: number;
+  days: DayResult[];
+  summary: MonthSummary;
+  locked: boolean;
+  extras: Record<string, HrDayExtras>;
+  defaults: { in: string; out: string };
+};
 
-/** HR: one person's month, day by day, read only. Locked months read the frozen copy. */
+/** HR: one person's month, day by day, with the punches and what HR can do about each day. Locked months read the frozen copy. */
 export async function getEmployeeMonthForHr(
   actor: Actor | null,
   employeeId: string,
@@ -460,7 +474,73 @@ export async function getEmployeeMonthForHr(
   const list = days.get(employeeId) ?? [];
   const today = todayIST();
   const locked = (await lockedMonthKeys(from, to, q)).has(`${year}-${String(month).padStart(2, "0")}`);
-  return { today, year, month, days: list, summary: summarizeMonth(list, policyAt(employeeId, today < from ? from : today > to ? to : today)), locked };
+  const policy = policyAt(employeeId, today < from ? from : today > to ? to : today);
+
+  const [punchRows, pendingRows] = await Promise.all([
+    q.query<{ d: string; hm: string; direction: "in" | "out" }>(
+      `select (punched_at at time zone 'Asia/Kolkata')::date::text as d, to_char(punched_at at time zone 'Asia/Kolkata', 'HH24:MI') as hm, direction
+         from punch where employee_id = $1 and (punched_at at time zone 'Asia/Kolkata')::date between $2::date and $3::date order by punched_at`,
+      [employeeId, from, to],
+    ),
+    q.query<{ id: string; d: string; in_time: string; out_time: string; reason: string }>(
+      `select id, work_date::text as d, to_char(in_time, 'HH24:MI') as in_time, to_char(out_time, 'HH24:MI') as out_time, reason
+         from regularization where employee_id = $1 and status = 'pending' and work_date between $2::date and $3::date`,
+      [employeeId, from, to],
+    ),
+  ]);
+  const extras: Record<string, HrDayExtras> = {};
+  for (const d of list) {
+    extras[d.date] = { punches: [], pending: null, canFix: !locked && d.date < today && isFixable(d) };
+  }
+  for (const p of punchRows) extras[p.d]?.punches.push({ time: p.hm, direction: p.direction });
+  for (const r of pendingRows) {
+    if (extras[r.d]) extras[r.d].pending = { id: r.id, inTime: r.in_time, outTime: r.out_time, reason: r.reason };
+  }
+  return { today, year, month, days: list, summary: summarizeMonth(list, policy), locked, extras, defaults: defaultFixTimes(policy) };
+}
+
+/**
+ * HR corrects one past day for someone else. Approved at once, with HR as the approver and a required reason.
+ * No employee deadline, but a locked month can never be changed (decision 2026-10-31).
+ */
+export async function hrFixDayTx(
+  tx: Queryable,
+  actor: Actor | null,
+  employeeId: string,
+  input: { date: string; in: string; out: string; reason: string },
+): Promise<void> {
+  requireRole(actor, "hr_admin");
+  if (employeeId === actor.employeeId) throw new ForbiddenError("You cannot fix your own attendance. Ask another HR admin.");
+  const emp = (await tx.query<{ status: string }>("select status from employee where id = $1 for update", [employeeId]))[0];
+  if (!emp || emp.status !== "active") throw new DomainError("Only active employees can have attendance fixed.");
+  const reason = input.reason.trim();
+  if (reason.length < 3) throw new DomainError("Please give a short reason.");
+  const today = todayIST();
+  if (input.date >= today) throw new DomainError(input.date > today ? "That date is in the future." : "Today is still in progress. It can be fixed from tomorrow.");
+  const times = checkFixTimes(input.in, input.out);
+  if (!times.ok) throw new DomainError(times.error);
+
+  await lockMonthsShared(tx, [input.date]); // R65
+  if (await firstLockedMonth(tx, [input.date])) throw new DomainError("That month is locked, so its days can no longer be changed.");
+  const { days } = await deriveRange(actor, [employeeId], input.date, input.date, tx);
+  const day = (days.get(employeeId) ?? [])[0];
+  if (!day || !isFixable(day)) throw new DomainError(`${formatDate(input.date)} does not need fixing, or a fix for it is already waiting or approved.`);
+
+  const batchId = (await tx.query<{ id: string }>("select gen_random_uuid()::text as id"))[0].id;
+  await tx.query(
+    `insert into regularization (employee_id, work_date, batch_id, in_time, out_time, reason, status, approver_id, decided_at, decision_note)
+     values ($1, $2, $3, $4, $5, $6, 'approved', $7, now(), 'Fixed by HR')`,
+    [employeeId, input.date, batchId, input.in, input.out, reason, actor.employeeId],
+  );
+  await recordAudit(
+    { actorEmployeeId: actor.employeeId, action: "regularization_hr_fixed", entity: "regularization", entityId: batchId, summary: `${input.date} for ${employeeId}: ${reason}` },
+    tx,
+  );
+}
+
+export async function hrFixDay(actor: Actor | null, employeeId: string, input: { date: string; in: string; out: string; reason: string }) {
+  requireRole(actor, "hr_admin");
+  return transaction((tx) => hrFixDayTx(tx, actor, employeeId, input));
 }
 
 export type MonthSummaryRow = {

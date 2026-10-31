@@ -5,6 +5,7 @@ import type { EmployeeMonth } from "@/modules/attendance/data";
 import { fmtDays } from "@/modules/leave/rules";
 import { formatMinutes } from "@/modules/attendance/rules";
 import { STATUS_LABELS, dateRange, partLabel, statusChipClass } from "../../_components/ui";
+import { hrFixDayAction, hrReviewFixAction } from "../attendance-actions";
 import { STATUS_INFO, StatusChip } from "../../attendance/_components/status";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -72,7 +73,89 @@ export function ProfileLeave({ data }: { data: EmployeeLeaveView }) {
   );
 }
 
-export function ProfileAttendance({ data, base }: { data: EmployeeMonth; base: string }) {
+function DayActions(props: {
+  day: string;
+  extras: EmployeeMonth["extras"][string] | undefined;
+  defaults: { in: string; out: string };
+  employeeId: string;
+  monthKey: string;
+}) {
+  const { day, extras, defaults, employeeId, monthKey } = props;
+  if (!extras) return <span className="muted">–</span>;
+  const hidden = (
+    <>
+      <input type="hidden" name="employeeId" value={employeeId} />
+      <input type="hidden" name="m" value={monthKey} />
+    </>
+  );
+  const none = extras.punches.length === 0 && !extras.pending && !extras.canFix;
+  if (none) return <span className="muted">–</span>;
+  return (
+    <div className="day-actions">
+      {extras.punches.length > 0 ? (
+        <details>
+          <summary>View punches</summary>
+          <ul className="plain-links">
+            {extras.punches.map((p, i) => (
+              <li key={i}>
+                {p.direction === "in" ? "Check in" : "Check out"} <span className="mono">{p.time}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+      {extras.pending ? (
+        <details>
+          <summary>Review fix</summary>
+          <p className="sub">
+            {extras.pending.inTime} to {extras.pending.outTime}: {extras.pending.reason}
+          </p>
+          <form action={hrReviewFixAction} className="inline-form">
+            {hidden}
+            <input type="hidden" name="requestId" value={extras.pending.id} />
+            <button type="submit" name="decision" value="approve" className="btn btn-primary btn-small">
+              Approve
+            </button>{" "}
+            <button type="submit" name="decision" value="reject" className="btn btn-secondary btn-small">
+              Reject
+            </button>
+          </form>
+        </details>
+      ) : null}
+      {extras.canFix ? (
+        <details>
+          <summary>Fix day</summary>
+          <form action={hrFixDayAction} className="form">
+            {hidden}
+            <input type="hidden" name="date" value={day} />
+            <div className="fix-times">
+              <label>
+                <span className="sr-only">Check-in time</span>
+                <input type="time" name="in" defaultValue={defaults.in} required />
+              </label>
+              <span aria-hidden="true">to</span>
+              <label>
+                <span className="sr-only">Check-out time</span>
+                <input type="time" name="out" defaultValue={defaults.out} required />
+              </label>
+            </div>
+            <div className="field">
+              <label htmlFor={`reason-${day}`}>Reason (required)</label>
+              <input id={`reason-${day}`} name="reason" required minLength={3} maxLength={300} autoComplete="off" />
+            </div>
+            <button type="submit" className="btn btn-primary btn-small">
+              Fix day
+            </button>
+            <p className="hint">Takes effect at once and is recorded as done by you.</p>
+          </form>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+export function ProfileAttendance({ data, base, employeeId }: { data: EmployeeMonth; base: string; employeeId: string }) {
+  const monthKey = `${data.year}-${String(data.month).padStart(2, "0")}`;
   const prev = data.month === 1 ? { y: data.year - 1, m: 12 } : { y: data.year, m: data.month - 1 };
   const next = data.month === 12 ? { y: data.year + 1, m: 1 } : { y: data.year, m: data.month + 1 };
   const link = (y: number, m: number) => `${base}?tab=attendance&m=${y}-${String(m).padStart(2, "0")}`;
@@ -112,6 +195,7 @@ export function ProfileAttendance({ data, base }: { data: EmployeeMonth; base: s
               <th scope="col">Out</th>
               <th scope="col">Worked</th>
               <th scope="col">Status</th>
+              <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -130,6 +214,9 @@ export function ProfileAttendance({ data, base }: { data: EmployeeMonth; base: s
                     <StatusChip status={d.status} provisional={d.provisional} />
                     {d.late ? <span className="sub">Late</span> : null}
                     {d.note && STATUS_INFO[d.status] ? <span className="sub">{d.note}</span> : null}
+                  </td>
+                  <td data-label="Actions">
+                    <DayActions day={d.date} extras={data.extras[d.date]} defaults={data.defaults} employeeId={employeeId} monthKey={monthKey} />
                   </td>
                 </tr>
               ))}

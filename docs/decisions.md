@@ -471,3 +471,15 @@ Owner chose to build it like PAN (decision P7 approach). Applies to the "Bank an
 Owner: everything that looks like a button on the HR dashboard must be clickable. The four tiles, the panel headings, the "Needs attention" rows, the names in the tables and lists, and the
 headcount bars now link to the page that has the detail: Active employees and the headcount bars to People (departments filter People), Working today and On leave today to the
 attendance team view, Pending approvals and the leave and attention rows to Leave approvals, and a person's name to People searched by their employee code. No data changes.
+
+## 2026-10-31: HR actions on a person's attendance days
+
+Owner approved the recommended set. On the profile's Attendance tab an **Actions** column sits next to Status. Locked months show no actions.
+
+- **View punches:** the raw check-in and check-out times of that day (read only).
+- **Review fix:** when the employee has a pending correction for the day, HR approves or rejects it there. Same rule and audit entry as on the approvals page.
+- **Fix day (HR):** for a past day that needs fixing (missed punch, absent, half day not worked) and has no pending fix. HR enters in and out times and a **required reason**. It is approved **at once**
+  (no manager step) and stored as an approved correction with HR as the approver, so the day is derived exactly like an employee fix. Audit action `regularization_hr_fixed` names the date and
+  the reason, never more. HR cannot fix their own days (another HR admin must). There is **no employee deadline** for HR: any past day of a month that is not locked can be fixed.
+  Once a month is locked nothing changes it. Today and future days cannot be fixed.
+- **Later, not now:** record leave for someone, approve work from home from this tab, and excuse a late mark (the last changes the deduction rule and needs its own decision).
